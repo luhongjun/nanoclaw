@@ -254,10 +254,18 @@ async function buildContainerArgs(
 
   // Always inject credentials from .env as fallback
   // OneCLI may be running but CLI tool might not be installed, or user may use non-Anthropic API
-  const envConfig = readEnvFile(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL']);
+  const envConfig = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_MODEL',
+  ]);
   if (envConfig.ANTHROPIC_API_KEY) {
     args.push('-e', `ANTHROPIC_API_KEY=${envConfig.ANTHROPIC_API_KEY}`);
-    args.push('-e', `ANTHROPIC_AUTH_TOKEN=${envConfig.ANTHROPIC_AUTH_TOKEN || envConfig.ANTHROPIC_API_KEY}`);
+    args.push(
+      '-e',
+      `ANTHROPIC_AUTH_TOKEN=${envConfig.ANTHROPIC_AUTH_TOKEN || envConfig.ANTHROPIC_API_KEY}`,
+    );
     if (envConfig.ANTHROPIC_BASE_URL) {
       args.push('-e', `ANTHROPIC_BASE_URL=${envConfig.ANTHROPIC_BASE_URL}`);
     }
