@@ -27,6 +27,7 @@ import {
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { readEnvFile } from './env.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -233,18 +234,43 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Mount .env file so agent-runner can read ANTHROPIC_* config values
+  const envFile = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envFile)) {
+    args.push('-v', `${envFile}:/app/.env:ro`);
+  }
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
+  let onecliApplied = false;
+  try {
+    onecliApplied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false, // Nanoclaw already handles host gateway
+      agent: agentIdentifier,
+    });
+  } catch (err) {
+    logger.warn({ containerName, err: String(err) }, 'OneCLI SDK call failed');
+  }
+
+  // Always inject credentials from .env as fallback
+  // OneCLI may be running but CLI tool might not be installed, or user may use non-Anthropic API
+  const envConfig = readEnvFile(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL']);
+  if (envConfig.ANTHROPIC_API_KEY) {
+    args.push('-e', `ANTHROPIC_API_KEY=${envConfig.ANTHROPIC_API_KEY}`);
+    args.push('-e', `ANTHROPIC_AUTH_TOKEN=${envConfig.ANTHROPIC_AUTH_TOKEN || envConfig.ANTHROPIC_API_KEY}`);
+    if (envConfig.ANTHROPIC_BASE_URL) {
+      args.push('-e', `ANTHROPIC_BASE_URL=${envConfig.ANTHROPIC_BASE_URL}`);
+    }
+    if (envConfig.ANTHROPIC_MODEL) {
+      args.push('-e', `ANTHROPIC_MODEL=${envConfig.ANTHROPIC_MODEL}`);
+    }
+    logger.info({ containerName }, 'Injected credentials from .env');
+  } else if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
     logger.warn(
       { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+      'No credentials available - OneCLI gateway not reachable AND no .env credentials found',
     );
   }
 

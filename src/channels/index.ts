@@ -10,3 +10,5 @@
 // telegram
 
 // whatsapp
+
+import './wecom.js';

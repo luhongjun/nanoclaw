@@ -10,6 +10,8 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'WECOM_BOT_ID',
+  'WECOM_SECRET',
 ]);
 
 export const ASSISTANT_NAME =
@@ -53,6 +55,10 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
 ); // 10MB default
 export const ONECLI_URL =
   process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
+export const WECOM_BOT_ID =
+  process.env.WECOM_BOT_ID || envConfig.WECOM_BOT_ID;
+export const WECOM_SECRET =
+  process.env.WECOM_SECRET || envConfig.WECOM_SECRET;
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
