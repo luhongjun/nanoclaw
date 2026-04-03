@@ -1,81 +1,81 @@
-# Branch & Fork Maintenance Guidelines
+# 分支与 Fork 维护指南
 
-## Structure
+## 结构
 
-**`qwibitai/nanoclaw`** (upstream) — core engine with skill definitions (`.claude/skills/`). No channel code on `main`.
+**`qwibitai/nanoclaw`**（上游）— 核心引擎，包含技能定义（`.claude/skills/`）。`main` 分支上没有通道代码。
 
-**Channel forks** (`nanoclaw-whatsapp`, `nanoclaw-telegram`, `nanoclaw-slack`, etc.) — each fork = upstream + one channel's code applied. Users clone upstream, then merge a fork into their clone to add a channel.
+**通道 Fork**（`nanoclaw-whatsapp`、`nanoclaw-telegram`、`nanoclaw-slack` 等）— 每个 Fork = 上游 + 一个通道的代码。用户克隆上游，然后合并 Fork 到他们的克隆中以添加通道。
 
-**`skill/*` and `feat/*` branches on upstream** — add features unrelated to channels (e.g. `skill/compact`, `skill/apple-container`). Users merge these into their clone to add capabilities. Channel-specific skill branches that duplicate the forks (e.g. `skill/whatsapp`, `skill/telegram`) are legacy.
+**上游的 `skill/*` 和 `feat/*` 分支** — 添加与通道无关的功能（例如 `skill/compact`、`skill/apple-container`）。用户将这些合并到他们的克隆中以添加功能。特定于通道的技能分支（如 `skill/whatsapp`、`skill/telegram`）是旧的，与 Fork 重复。
 
-## How users add capabilities
-
-```
-user clones upstream main
-  ├── merges nanoclaw-whatsapp fork  → adds WhatsApp
-  ├── merges skill/compact branch    → adds /compact command
-  └── merges skill/apple-container   → switches to Apple Container
-```
-
-## Merge directions
+## 用户如何添加功能
 
 ```
-upstream main ──→ channel forks     (forward merge to keep forks caught up)
-upstream main ──→ skill branches    (forward merge to keep branches caught up)
+用户克隆上游 main
+  ├── 合并 nanoclaw-whatsapp fork  → 添加 WhatsApp
+  ├── 合并 skill/compact branch    → 添加 /compact 命令
+  └── 合并 skill/apple-container   → 切换到 Apple Container
 ```
 
-Forks and skill branches carry applied code changes. Users merge them into their own clones/forks to add capabilities. They are never merged back into upstream `main`.
+## 合并方向
 
-## Forward merge procedure
+```
+上游 main ──→ 通道 Fork          （向前合并，保持 Fork 更新）
+上游 main ──→ skill 分支         （向前合并，保持分支更新）
+```
+
+Fork 和技能分支携带应用的代码更改。用户将它们合并到自己的克隆/Fork 中以添加功能。它们永远不会被合并回上游 `main`。
+
+## 向前合并过程
 
 ```bash
-# In your local nanoclaw checkout
+# 在你的本地 nanoclaw 检出中
 git checkout main && git pull
 
-# For a fork:
+# 对于 Fork：
 git fetch nanoclaw-whatsapp
 git checkout -B whatsapp-merge nanoclaw-whatsapp/main
 git merge main
-# Resolve conflicts (see below)
-# Remove upstream-only workflows (re-added by every merge since main has them):
+# 解决冲突（见下文）
+# 删除仅上游的工作流（每次合并后重新添加，因为 main 有它们）：
 git rm .github/workflows/bump-version.yml .github/workflows/update-tokens.yml 2>/dev/null
 git push nanoclaw-whatsapp HEAD:main
 git checkout main && git branch -D whatsapp-merge
 
-# For a skill branch:
+# 对于技能分支：
 git checkout -B skill/compact origin/skill/compact
 git merge main
-# Resolve conflicts (see below)
+# 解决冲突（见下文）
 git push origin skill/compact
 git checkout main && git branch -D skill/compact
 ```
 
-## Conflict resolution
+## 冲突解决
 
-The same files conflict every time:
+相同的文件每次都会冲突：
 
-| File | Resolution |
-|------|------------|
-| `package.json` | Take main's version + keep fork/branch-specific deps |
+| 文件 | 解决方法 |
+|------|----------|
+| `package.json` | 采用 main 的版本 + 保留 Fork/分支特定的依赖 |
 | `package-lock.json` | `git checkout main -- package-lock.json && npm install` |
-| `.env.example` | Combine: main's entries + fork/branch-specific entries |
-| `repo-tokens/badge.svg` | Take main's version (auto-generated) |
+| `.env.example` | 合并：main 的条目 + Fork/分支特定的条目 |
+| `repo-tokens/badge.svg` | 采用 main 的版本（自动生成） |
 
-Source code changes (e.g. `src/types.ts`, `src/index.ts`) usually auto-merge cleanly, but can conflict if both sides modify the same lines. **Always build and test after every forward merge** — auto-merged code can be silently wrong (e.g. referencing a renamed function or using a removed parameter) even when git reports no conflicts.
+源代码更改（如 `src/types.ts`、`src/index.ts`）通常会自动合并，但如果双方修改相同的行可能会冲突。**每次向前合并后务必构建和测试** — 即使 git 报告没有冲突，自动合并的代码也可能静默出错（例如引用已重命名的函数或使用已删除的参数）。
 
-## When to merge forward
+## 何时向前合并
 
-After any main change that touches shared files (`package.json`, `src/index.ts`, `CLAUDE.md`, etc.). Small frequent merges = trivial conflicts. Large infrequent merges = painful.
+在任何 main 更改触及共享文件（`package.json`、`src/index.ts`、`CLAUDE.md` 等）之后。小频率的合并 = 微不足道的冲突。大频率的合并 = 痛苦的。
 
-## Fork setup
+## Fork 设置
 
-When creating a new channel fork:
+创建新通道 Fork 时：
 
-1. Fork `nanoclaw` to `nanoclaw-{channel}`
-2. Remove upstream-only workflows: `bump-version.yml`, `update-tokens.yml`
-3. Add channel code, deps, env vars
-4. Forward-merge main immediately to establish a clean baseline
+1. Fork `nanoclaw` 到 `nanoclaw-{channel}`
+2. 删除仅上游的工作流：`bump-version.yml`、`update-tokens.yml`
+3. 添加通道代码、依赖、环境变量
+4. 立即向前合并 main 以建立干净的基线
 
-## Dependencies
+## 依赖关系
 
-Forks and branches add their own deps on top of upstream's. When upstream adds or removes a dependency, verify that forks/branches still build after the next forward merge — transitive dependency changes can break downstream code.
+Fork 和分支在上游的基础上添加自己的依赖。当上游添加或删除依赖时，在下次向前合并后验证 Fork/分支仍能构建 — 传递依赖更改可能会破坏下游代码。

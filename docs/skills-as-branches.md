@@ -1,76 +1,76 @@
-# Skills as Branches
+# 技能作为分支
 
-## Overview
+## 概述
 
-This document covers **feature skills** — skills that add capabilities via git branch merges. This is the most complex skill type and the primary way NanoClaw is extended.
+本文档介绍**功能技能** — 通过 git 分支合并添加功能的技能。这是最复杂的技能类型，也是 NanoClaw 扩展的主要方式。
 
-NanoClaw has four types of skills overall. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full taxonomy:
+NanoClaw 总共有四种类型的技能。参见 [CONTRIBUTING.md](../CONTRIBUTING.md) 获取完整的分类：
 
-| Type | Location | How it works |
+| 类型 | 位置 | 工作原理 |
 |------|----------|-------------|
-| **Feature** (this doc) | `.claude/skills/` + `skill/*` branch | SKILL.md has instructions; code lives on a branch, applied via `git merge` |
-| **Utility** | `.claude/skills/<name>/` with code files | Self-contained tools; code in skill directory, copied into place on install |
-| **Operational** | `.claude/skills/` on `main` | Instruction-only workflows (setup, debug, update) |
-| **Container** | `container/skills/` | Loaded inside agent containers at runtime |
+| **功能**（本文档） | `.claude/skills/` + `skill/*` 分支 | SKILL.md 有指令；代码在分支上，通过 `git merge` 应用 |
+| **实用** | `.claude/skills/<name>/` 带代码文件 | 自包含工具；代码在技能目录中，安装时复制到位 |
+| **操作** | `main` 上的 `.claude/skills/` | 仅指令的工作流（setup、debug、update） |
+| **容器** | `container/skills/` | 在 agent 容器内运行时加载 |
 
 ---
 
-Feature skills are distributed as git branches on the upstream repository. Applying a skill is a `git merge`. Updating core is a `git merge`. Everything is standard git.
+功能技能作为 git 分支分布在上游仓库上。应用技能就是 `git merge`。更新核心就是 `git merge`。一切都是标准的 git。
 
-This replaces the previous `skills-engine/` system (three-way file merging, `.nanoclaw/` state, manifest files, replay, backup/restore) with plain git operations and Claude for conflict resolution.
+这取代了以前的 `skills-engine/` 系统（三方文件合并、`.nanoclaw/` 状态、清单文件、重放、备份/恢复）与简单的 git 操作和 Claude 用于冲突解决。
 
-## How It Works
+## 工作原理
 
-### Repository structure
+### 仓库结构
 
-The upstream repo (`qwibitai/nanoclaw`) maintains:
+上游仓库（`qwibitai/nanoclaw`）维护：
 
-- `main` — core NanoClaw (no skill code)
-- `skill/discord` — main + Discord integration
-- `skill/telegram` — main + Telegram integration
-- `skill/slack` — main + Slack integration
-- `skill/gmail` — main + Gmail integration
-- etc.
+- `main` — 核心 NanoClaw（无技能代码）
+- `skill/discord` — main + Discord 集成
+- `skill/telegram` — main + Telegram 集成
+- `skill/slack` — main + Slack 集成
+- `skill/gmail` — main + Gmail 集成
+- 等等。
 
-Each skill branch contains all the code changes for that skill: new files, modified source files, updated `package.json` dependencies, `.env.example` additions — everything. No manifest, no structured operations, no separate `add/` and `modify/` directories.
+每个技能分支包含该技能的所有代码更改：新文件、修改的源文件、更新的 `package.json` 依赖、`.env.example` 添加 — 所有一切。无清单，无结构化操作，无单独的 `add/` 和 `modify/` 目录。
 
-### Skill discovery and installation
+### 技能发现和安装
 
-Skills are split into two categories:
+技能分为两类：
 
-**Operational skills** (on `main`, always available):
-- `/setup`, `/debug`, `/update-nanoclaw`, `/customize`, `/update-skills`
-- These are instruction-only SKILL.md files — no code changes, just workflows
-- Live in `.claude/skills/` on `main`, immediately available to every user
+**操作技能**（在 `main` 上，始终可用）：
+- `/setup`、`/debug`、`/update-nanoclaw`、`/customize`、`/update-skills`
+- 这些是指令仅有的 SKILL.md 文件 — 无代码更改，只是工作流
+- 在 `main` 上的 `.claude/skills/` 中，每个用户立即可用
 
-**Feature skills** (in marketplace, installed on demand):
-- `/add-discord`, `/add-telegram`, `/add-slack`, `/add-gmail`, etc.
-- Each has a SKILL.md with setup instructions and a corresponding `skill/*` branch with code
-- Live in the marketplace repo (`qwibitai/nanoclaw-skills`)
+**功能技能**（在市场上，按需安装）：
+- `/add-discord`、`/add-telegram`、`/add-slack`、`/add-gmail` 等
+- 每个都有 SKILL.md 带有设置指令和相应的 `skill/*` 分支带有代码
+- 位于市场仓库（`qwibitai/nanoclaw-skills`）中
 
-Users never interact with the marketplace directly. The operational skills `/setup` and `/customize` handle plugin installation transparently:
+用户从不直接与市场交互。操作技能 `/setup` 和 `/customize` 透明地处理插件安装：
 
 ```bash
-# Claude runs this behind the scenes — users don't see it
+# Claude 在幕后运行这个 — 用户看不到
 claude plugin install nanoclaw-skills@nanoclaw-skills --scope project
 ```
 
-Skills are hot-loaded after `claude plugin install` — no restart needed. This means `/setup` can install the marketplace plugin, then immediately run any feature skill, all in one session.
+技能在 `claude plugin install` 后热加载 — 无需重启。这意味着 `/setup` 可以安装市场插件，然后立即运行任何功能技能，都在一个会话中。
 
-### Selective skill installation
+### 选择性技能安装
 
-`/setup` asks users what channels they want, then only offers relevant skills:
+`/setup` 询问用户想要什么通道，然后只提供相关技能：
 
-1. "Which messaging channels do you want to use?" → Discord, Telegram, Slack, WhatsApp
-2. User picks Telegram → Claude installs the plugin and runs `/add-telegram`
-3. After Telegram is set up: "Want to add Agent Swarm support for Telegram?" → offers `/add-telegram-swarm`
-4. "Want to enable community skills?" → installs community marketplace plugins
+1. "你想使用哪些消息通道？" → Discord、Telegram、Slack、WhatsApp
+2. 用户选择 Telegram → Claude 安装插件并运行 `/add-telegram`
+3. Telegram 设置好后："想为 Telegram 添加 Agent Swarm 支持吗？" → 提供 `/add-telegram-swarm`
+4. "想启用社区技能吗？" → 安装社区市场插件
 
-Dependent skills (e.g., `telegram-swarm` depends on `telegram`) are only offered after their parent is installed. `/customize` follows the same pattern for post-setup additions.
+依赖技能（例如 `telegram-swarm` 依赖于 `telegram`）仅在其父级安装后才提供。`/customize` 在设置后添加时遵循相同的模式。
 
-### Marketplace configuration
+### 市场配置
 
-NanoClaw's `.claude/settings.json` registers the official marketplace:
+NanoClaw 的 `.claude/settings.json` 注册官方市场：
 
 ```json
 {
@@ -85,19 +85,19 @@ NanoClaw's `.claude/settings.json` registers the official marketplace:
 }
 ```
 
-The marketplace repo uses Claude Code's plugin structure:
+市场仓库使用 Claude Code 的插件结构：
 
 ```
 qwibitai/nanoclaw-skills/
   .claude-plugin/
-    marketplace.json              # Plugin catalog
+    marketplace.json              # 插件目录
   plugins/
-    nanoclaw-skills/              # Single plugin bundling all official skills
+    nanoclaw-skills/              # 捆绑所有官方技能的单个插件
       .claude-plugin/
-        plugin.json               # Plugin manifest
+        plugin.json               # 插件清单
       skills/
         add-discord/
-          SKILL.md                # Setup instructions; step 1 is "merge the branch"
+          SKILL.md                # 设置指令；步骤 1 是"合并分支"
         add-telegram/
           SKILL.md
         add-slack/
@@ -105,195 +105,195 @@ qwibitai/nanoclaw-skills/
         ...
 ```
 
-Multiple skills are bundled in one plugin — installing `nanoclaw-skills` makes all feature skills available at once. Individual skills don't need separate installation.
+多个技能捆绑在一个插件中 — 安装 `nanoclaw-skills` 使所有功能技能立即可用。单个技能不需要单独安装。
 
-Each SKILL.md tells Claude to merge the corresponding skill branch as step 1, then walks through interactive setup (env vars, bot creation, etc.).
+每个 SKILL.md 告诉 Claude 合并相应的技能分支作为步骤 1，然后遍历交互式设置（创建机器人、获取令牌、配置环境变量等）。
 
-### Applying a skill
+### 应用技能
 
-User runs `/add-discord` (discovered via marketplace). Claude follows the SKILL.md:
+用户运行 `/add-discord`（通过市场发现）。Claude 遵循 SKILL.md：
 
 1. `git fetch upstream skill/discord`
 2. `git merge upstream/skill/discord`
-3. Interactive setup (create bot, get token, configure env vars, etc.)
+3. 交互式设置（创建机器人、获取令牌、配置环境变量等）
 
-Or manually:
+或手动：
 
 ```bash
 git fetch upstream skill/discord
 git merge upstream/skill/discord
 ```
 
-### Applying multiple skills
+### 应用多个技能
 
 ```bash
 git merge upstream/skill/discord
 git merge upstream/skill/telegram
 ```
 
-Git handles the composition. If both skills modify the same lines, it's a real conflict and Claude resolves it.
+Git 处理组合。如果两个技能修改相同的行，这是真正的冲突，Claude 解决它。
 
-### Updating core
+### 更新核心
 
 ```bash
 git fetch upstream main
 git merge upstream/main
 ```
 
-Since skill branches are kept merged-forward with main (see CI section), the user's merged-in skill changes and upstream changes have proper common ancestors.
+由于技能分支与 main 保持合并向前（参见 CI 部分），用户合并的技能更改和上游更改有适当的共同祖先。
 
-### Checking for skill updates
+### 检查技能更新
 
-Users who previously merged a skill branch can check for updates. For each `upstream/skill/*` branch, check whether the branch has commits that aren't in the user's HEAD:
+合并了技能分支的用户可以检查更新。对于每个 `upstream/skill/*` 分支，检查分支是否有不在用户 HEAD 中的提交：
 
 ```bash
 git fetch upstream
 for branch in $(git branch -r | grep 'upstream/skill/'); do
-  # Check if user has merged this skill at some point
+  # 检查用户是否在某个时候合并了这个技能
   merge_base=$(git merge-base HEAD "$branch" 2>/dev/null) || continue
-  # Check if the skill branch has new commits beyond what the user has
+  # 检查技能分支是否有超出用户的新提交
   if ! git merge-base --is-ancestor "$branch" HEAD 2>/dev/null; then
-    echo "$branch has updates available"
+    echo "$branch 有更新可用"
   fi
 done
 ```
 
-This requires no state — it uses git history to determine which skills were previously merged and whether they have new commits.
+这不需要状态 — 它使用 git 历史来确定哪些技能以前合并过，以及它们是否有新提交。
 
-This logic is available in two ways:
-- Built into `/update-nanoclaw` — after merging main, optionally check for skill updates
-- Standalone `/update-skills` — check and merge skill updates independently
+此逻辑有两种提供方式：
+- 内置于 `/update-nanoclaw` — 合并 main 后，可选检查技能更新
+- 独立 `/update-skills` — 独立检查和合并技能更新
 
-### Conflict resolution
+### 冲突解决
 
-At any merge step, conflicts may arise. Claude resolves them — reading the conflicted files, understanding the intent of both sides, and producing the correct result. This is what makes the branch approach viable at scale: conflict resolution that previously required human judgment is now automated.
+在任何合并步骤，可能会出现冲突。Claude 解决它们 — 读取冲突的文件，理解双方的意图，并产生正确的结果。这就是为什么分支方法在规模上可行：以前需要人类判断的冲突解决现在自动化了。
 
-### Skill dependencies
+### 技能依赖
 
-Some skills depend on other skills. E.g., `skill/telegram-swarm` requires `skill/telegram`. Dependent skill branches are branched from their parent skill branch, not from `main`.
+有些技能依赖于其他技能。例如，`skill/telegram-swarm` 需要 `skill/telegram`。依赖技能分支从其父技能分支分支，而不是从 `main`。
 
-This means `skill/telegram-swarm` includes all of telegram's changes plus its own additions. When a user merges `skill/telegram-swarm`, they get both — no need to merge telegram separately.
+这意味着 `skill/telegram-swarm` 包括 telegram 的所有更改加上它自己的添加。当用户合并 `skill/telegram-swarm` 时，他们获得两者 — 不需要单独合并 telegram。
 
-Dependencies are implicit in git history — `git merge-base --is-ancestor` determines whether one skill branch is an ancestor of another. No separate dependency file is needed.
+依赖在 git 历史中是隐式的 — `git merge-base --is-ancestor` 确定一个技能分支是否是另一个的祖先。不需要单独的依赖文件。
 
-### Uninstalling a skill
+### 卸载技能
 
 ```bash
-# Find the merge commit
+# 查找合并提交
 git log --merges --oneline | grep discord
 
-# Revert it
-git revert -m 1 <merge-commit>
+# 还原它
+git revert -m 1 <合并提交>
 ```
 
-This creates a new commit that undoes the skill's changes. Claude can handle the whole flow.
+这会创建一个撤销技能更改的新提交。Claude 可以处理整个流程。
 
-If the user has modified the skill's code since merging (custom changes on top), the revert might conflict — Claude resolves it.
+如果用户自合并以来修改了技能的代码（顶部的自定义更改），还原可能会冲突 — Claude 解决它。
 
-If the user later wants to re-apply the skill, they need to revert the revert first (git treats reverted changes as "already applied and undone"). Claude handles this too.
+如果用户后来想重新应用技能，他们需要还原还原（git 将还原的更改视为"已应用并撤销"）。Claude 也处理这个。
 
-## CI: Keeping Skill Branches Current
+## CI：保持技能分支最新
 
-A GitHub Action runs on every push to `main`:
+GitHub Action 在每次推送到 `main` 时运行：
 
-1. List all `skill/*` branches
-2. For each skill branch, merge `main` into it (merge-forward, not rebase)
-3. Run build and tests on the merged result
-4. If tests pass, push the updated skill branch
-5. If a skill fails (conflict, build error, test failure), open a GitHub issue for manual resolution
+1. 列出所有 `skill/*` 分支
+2. 对于每个技能分支，将 `main` 合并到其中（合并向前，不是变基）
+3. 在合并结果上运行构建和测试
+4. 如果测试通过，推送更新的技能分支
+5. 如果技能失败（冲突、构建错误、测试失败），打开 GitHub 问题以手动解决
 
-**Why merge-forward instead of rebase:**
-- No force-push — preserves history for users who already merged the skill
-- Users can re-merge a skill branch to pick up skill updates (bug fixes, improvements)
-- Git has proper common ancestors throughout the merge graph
+**为什么合并向前而不是变基：**
+- 无需强制推送 — 为已经合并技能的用户保留历史
+- 用户可以重新合并技能分支以获取技能更新（错误修复、改进）
+- Git 在整个合并图中有适当的共同祖先
 
-**Why this scales:** With a few hundred skills and a few commits to main per day, the CI cost is trivial. Haiku is fast and cheap. The approach that wouldn't have been feasible a year or two ago is now practical because Claude can resolve conflicts at scale.
+**为什么这可以扩展：** 有几百个技能和每天几个 main 提交，CI 成本是微不足道的。Haiku 又快又便宜。这种方法在一两年前还不可行，现在实用是因为 Claude 可以大规模解决冲突。
 
-## Installation Flow
+## 安装流程
 
-### New users (recommended)
+### 新用户（推荐）
 
-1. Fork `qwibitai/nanoclaw` on GitHub (click the Fork button)
-2. Clone your fork:
+1. 在 GitHub 上 fork `qwibitai/nanoclaw`（点击 Fork 按钮）
+2. 克隆你的 fork：
    ```bash
-   git clone https://github.com/<you>/nanoclaw.git
+   git clone https://github.com/<你>/nanoclaw.git
    cd nanoclaw
    ```
-3. Run Claude Code:
+3. 运行 Claude Code：
    ```bash
    claude
    ```
-4. Run `/setup` — Claude handles dependencies, authentication, container setup, service configuration, and adds `upstream` remote if not present
+4. 运行 `/setup` — Claude 处理依赖、认证、容器设置、服务配置，并添加 `upstream` 远程（如果不存在）
 
-Forking is recommended because it gives users a remote to push their customizations to. Clone-only works for trying things out but provides no remote backup.
+推荐 fork 是因为它为用户提供一个远程来推送他们的自定义。仅克隆适用于尝试但不提供远程备份。
 
-### Existing users migrating from clone
+### 从克隆迁移的现有用户
 
-Users who previously ran `git clone https://github.com/qwibitai/nanoclaw.git` and have local customizations:
+以前运行过 `git clone https://github.com/qwibitai/nanoclaw.git` 并有本地自定义的用户：
 
-1. Fork `qwibitai/nanoclaw` on GitHub
-2. Reroute remotes:
+1. 在 GitHub 上 fork `qwibitai/nanoclaw`
+2. 重新路由远程：
    ```bash
    git remote rename origin upstream
-   git remote add origin https://github.com/<you>/nanoclaw.git
+   git remote add origin https://github.com/<你>/nanoclaw.git
    git push --force origin main
    ```
-   The `--force` is needed because the fresh fork's main is at upstream's latest, but the user wants their (possibly behind) version. The fork was just created so there's nothing to lose.
-3. From this point, `origin` = their fork, `upstream` = qwibitai/nanoclaw
+   需要 `--force` 因为新鲜的 fork 的 main 在上游的最新位置，但用户想要他们的（可能落后）版本。刚创建的 fork 没有什么可失去的。
+3. 从现在开始，`origin` = 他们的 fork，`upstream` = qwibitai/nanoclaw
 
-### Existing users migrating from the old skills engine
+### 从旧技能引擎迁移的现有用户
 
-Users who previously applied skills via the `skills-engine/` system have skill code in their tree but no merge commits linking to skill branches. Git doesn't know these changes came from a skill, so merging a skill branch on top would conflict or duplicate.
+以前通过 `skills-engine/` 系统应用技能的用户在其树中有技能代码但没有链接到技能分支的合并提交。Git 不知道这些更改来自技能，所以在顶部合并技能分支可能会冲突或重复。
 
-**For new skills going forward:** just merge skill branches as normal. No issue.
+**对于未来的新技能：** 只需像平常一样合并技能分支。没问题。
 
-**For existing old-engine skills**, two migration paths:
+**对于现有的旧引擎技能**，两个迁移路径：
 
-**Option A: Per-skill reapply (keep your fork)**
-1. For each old-engine skill: identify and revert the old changes, then merge the skill branch fresh
-2. Claude assists with identifying what to revert and resolving any conflicts
-3. Custom modifications (non-skill changes) are preserved
+**选项 A：每个技能重新应用（保留你的 fork）**
+1. 对于每个旧引擎技能：识别并还原旧更改，然后新鲜合并技能分支
+2. Claude 协助识别要还原的内容并解决任何冲突
+3. 自定义修改（非技能更改）保留
 
-**Option B: Fresh start (cleanest)**
-1. Create a new fork from upstream
-2. Merge the skill branches you want
-3. Manually re-apply your custom (non-skill) changes
-4. Claude assists by diffing your old fork against the new one to identify custom changes
+**选项 B：重新开始（最干净）**
+1. 从上游创建新的 fork
+2. 合并你想要的技能分支
+3. 手动重新应用你的自定义（非技能）更改
+4. Claude 通过比较你的旧 fork 和新 fork 来识别自定义更改
 
-In both cases:
-- Delete the `.nanoclaw/` directory (no longer needed)
-- The `skills-engine/` code will be removed from upstream once all skills are migrated
-- `/update-skills` only tracks skills applied via branch merge — old-engine skills won't appear in update checks
+在这两种情况下：
+- 删除 `.nanoclaw/` 目录（不再需要）
+- `skills-engine/` 代码将从上游移除，一旦所有技能迁移
+- `/update-skills` 只跟踪通过分支合并应用的技能 — 旧引擎技能不会出现在更新检查中
 
-## User Workflows
+## 用户工作流
 
-### Custom changes
+### 自定义更改
 
-Users make custom changes directly on their main branch. This is the standard fork workflow — their `main` IS their customized version.
+用户直接在其 main 分支上进行自定义更改。这是标准的 fork 工作流 — 他们的 `main` 就是他们的自定义版本。
 
 ```bash
-# Make changes
+# 进行更改
 vim src/config.ts
-git commit -am "change trigger word to @Bob"
+git commit -am "将触发词更改为@Bob"
 git push origin main
 ```
 
-Custom changes, skills, and core updates all coexist on their main branch. Git handles the three-way merging at each merge step because it can trace common ancestors through the merge history.
+自定义更改、技能和核心更新都共存于他们的 main 分支上。Git 在每个合并步骤处理三方合并，因为它可以通过合并历史追踪共同祖先。
 
-### Applying a skill
+### 应用技能
 
-Run `/add-discord` in Claude Code (discovered via the marketplace plugin), or manually:
+在 Claude Code 中运行 `/add-discord`（通过市场插件发现），或手动：
 
 ```bash
 git fetch upstream skill/discord
 git merge upstream/skill/discord
-# Follow setup instructions for configuration
+# 遵循设置指令进行配置
 git push origin main
 ```
 
-If the user is behind upstream's main when they merge a skill branch, the merge might bring in some core changes too (since skill branches are merged-forward with main). This is generally fine — they get a compatible version of everything.
+如果用户在合并技能分支时落后于上游的 main，合并可能也会带来一些核心更改（因为技能分支与 main 合并向前）。这通常没问题 — 他们获得兼容版本的所有东西。
 
-### Updating core
+### 更新核心
 
 ```bash
 git fetch upstream main
@@ -301,86 +301,86 @@ git merge upstream/main
 git push origin main
 ```
 
-This is the same as the existing `/update-nanoclaw` skill's merge path.
+这与现有的 `/update-nanoclaw` 技能的合并路径相同。
 
-### Updating skills
+### 更新技能
 
-Run `/update-skills` or let `/update-nanoclaw` check after a core update. For each previously-merged skill branch that has new commits, Claude offers to merge the updates.
+运行 `/update-skills` 或让 `/update-nanoclaw` 在核心更新后检查。对于每个以前合并的技能分支有新提交，Claude 提供合并更新。
 
-### Contributing back to upstream
+### 贡献回上游
 
-Users who want to submit a PR to upstream:
+想要向 upstream 提交 PR 的用户：
 
 ```bash
 git fetch upstream main
 git checkout -b my-fix upstream/main
-# Make changes
+# 进行更改
 git push origin my-fix
-# Create PR from my-fix to qwibitai/nanoclaw:main
+# 从 my-fix 创建 PR 到 qwibitai/nanoclaw:main
 ```
 
-Standard fork contribution workflow. Their custom changes stay on their main and don't leak into the PR.
+标准 fork 贡献工作流。他们的自定义更改留在他们的 main 上，不会泄露到 PR 中。
 
-## Contributing a Skill
+## 贡献技能
 
-The flow below is for **feature skills** (branch-based). For utility skills (self-contained tools) and container skills, the contributor opens a PR that adds files directly to `.claude/skills/<name>/` or `container/skills/<name>/` — no branch extraction needed. See [CONTRIBUTING.md](../CONTRIBUTING.md) for all skill types.
+下面的流程是针对**功能技能**（基于分支）。对于实用技能（自包含工具）和容器技能，贡献者打开 PR 直接将文件添加到 `.claude/skills/<name>/` 或 `container/skills/<name>/` — 无需分支提取。参见 [CONTRIBUTING.md](../CONTRIBUTING.md) 获取所有技能类型。
 
-### Contributor flow (feature skills)
+### 贡献者流程（功能技能）
 
-1. Fork `qwibitai/nanoclaw`
-2. Branch from `main`
-3. Make the code changes (new channel file, modified integration points, updated package.json, .env.example additions, etc.)
-4. Open a PR to `main`
+1. fork `qwibitai/nanoclaw`
+2. 从 `main` 分支
+3. 进行代码更改（新通道文件、修改的集成点、更新的 package.json、.env.example 添加等）
+4. 打开 PR 到 `main`
 
-The contributor opens a normal PR — they don't need to know about skill branches or marketplace repos. They just make code changes and submit.
+贡献者打开正常的 PR — 他们不需要知道技能分支或市场仓库。他们只是进行代码更改并提交。
 
-### Maintainer flow
+### 维护者流程
 
-When a skill PR is reviewed and approved:
+当技能 PR 被审查和批准时：
 
-1. Create a `skill/<name>` branch from the PR's commits:
+1. 从 PR 的提交创建 `skill/<name>` 分支：
    ```bash
    git fetch origin pull/<PR_NUMBER>/head:skill/<name>
    git push origin skill/<name>
    ```
-2. Force-push to the contributor's PR branch, replacing it with a single commit that adds the contributor to `CONTRIBUTORS.md` (removing all code changes)
-3. Merge the slimmed PR into `main` (just the contributor addition)
-4. Add the skill's SKILL.md to the marketplace repo (`qwibitai/nanoclaw-skills`)
+2. 强制推送到贡献者的 PR 分支，用单个提交替换它，将贡献者添加到 `CONTRIBUTORS.md`（移除所有代码更改）
+3. 将精简的 PR 合并到 `main`（仅添加贡献者）
+4. 将技能的 SKILL.md 添加到市场仓库（`qwibitai/nanoclaw-skills`）
 
-This way:
-- The contributor gets merge credit (their PR is merged)
-- They're added to CONTRIBUTORS.md automatically by the maintainer
-- The skill branch is created from their work
-- `main` stays clean (no skill code)
-- The contributor only had to do one thing: open a PR with code changes
+这样：
+- 贡献者获得合并荣誉（他们的 PR 被合并）
+- 他们自动添加到 CONTRIBUTORS.md
+- 技能分支从他们的工作中创建
+- `main` 保持干净（无技能代码）
+- 贡献者只需要做一件事：打开带有代码更改的 PR
 
-**Note:** GitHub PRs from forks have "Allow edits from maintainers" checked by default, so the maintainer can push to the contributor's PR branch.
+**注意：** GitHub PR 从 fork 默认勾选"允许维护者编辑"，所以维护者可以推送到贡献者的 PR 分支。
 
-### Skill SKILL.md
+### 技能 SKILL.md
 
-The contributor can optionally provide a SKILL.md (either in the PR or separately). This goes into the marketplace repo and contains:
+贡献者可以提供 SKILL.md（在 PR 中或单独）。这进入市场仓库并包含：
 
-1. Frontmatter (name, description, triggers)
-2. Step 1: Merge the skill branch
-3. Steps 2-N: Interactive setup (create bot, get token, configure env vars, verify)
+1. Frontmatter（名称、描述、触发器）
+2. 步骤 1：合并技能分支
+3. 步骤 2-N：交互式设置（创建机器人、获取令牌、配置环境变量等）
 
-If the contributor doesn't provide a SKILL.md, the maintainer writes one based on the PR.
+如果贡献者不提供 SKILL.md，维护者根据 PR 编写一个。
 
-## Community Marketplaces
+## 社区市场
 
-Anyone can maintain their own fork with skill branches and their own marketplace repo. This enables a community-driven skill ecosystem without requiring write access to the upstream repo.
+任何人都可以维护自己的带有技能分支的 fork 和自己的市场仓库。这实现了社区驱动的技能生态系统，无需上游仓库的写入权限。
 
-### How it works
+### 工作原理
 
-A community contributor:
+社区贡献者：
 
-1. Maintains a fork of NanoClaw (e.g., `alice/nanoclaw`)
-2. Creates `skill/*` branches on their fork with their custom skills
-3. Creates a marketplace repo (e.g., `alice/nanoclaw-skills`) with a `.claude-plugin/marketplace.json` and plugin structure
+1. 维护 NanoClaw 的 fork（例如 `alice/nanoclaw`）
+2. 在其 fork 上创建带有自定义技能的 `skill/*` 分支
+3. 创建市场仓库（例如 `alice/nanoclaw-skills`），带有 `.claude-plugin/marketplace.json` 和插件结构
 
-### Adding a community marketplace
+### 添加社区市场
 
-If the community contributor is trusted, they can open a PR to add their marketplace to NanoClaw's `.claude/settings.json`:
+如果社区贡献者值得信任，他们可以打开 PR 将他们的市场添加到 NanoClaw 的 `.claude/settings.json`：
 
 ```json
 {
@@ -401,171 +401,171 @@ If the community contributor is trusted, they can open a PR to add their marketp
 }
 ```
 
-Once merged, all NanoClaw users automatically discover the community marketplace alongside the official one.
+一旦合并，所有 NanoClaw 用户自动发现社区市场与官方市场一起。
 
-### Installing community skills
+### 安装社区技能
 
-`/setup` and `/customize` ask users whether they want to enable community skills. If yes, Claude installs community marketplace plugins via `claude plugin install`:
+`/setup` 和 `/customize` 询问用户是否想启用社区技能。如果是，Claude 通过 `claude plugin install` 安装社区市场插件：
 
 ```bash
 claude plugin install alice-skills@alice-nanoclaw-skills --scope project
 ```
 
-Community skills are hot-loaded and immediately available — no restart needed. Dependent skills are only offered after their prerequisites are met (e.g., community Telegram add-ons only after Telegram is installed).
+社区技能热加载并立即可用 — 无需重启。依赖技能仅在其先决条件满足后才提供（例如 Telegram 社区附加组件仅在 Telegram 安装后）。
 
-Users can also browse and install community plugins manually via `/plugin`.
+用户也可以通过 `/plugin` 手动浏览和安装社区插件。
 
-### Properties of this system
+### 这个系统的属性
 
-- **No gatekeeping required.** Anyone can create skills on their fork without permission. They only need approval to be listed in the auto-discovered marketplaces.
-- **Multiple marketplaces coexist.** Users see skills from all trusted marketplaces in `/plugin`.
-- **Community skills use the same merge pattern.** The SKILL.md just points to a different remote:
+- **无需看门人。** 任何人都可以在其 fork 上创建技能，无需许可。他们只需要批准才能列入自动发现的市场。
+- **多个市场共存。** 用户在 `/plugin` 中看到来自所有信任市场的技能。
+- **社区技能使用相同的合并模式。** SKILL.md 只指向不同的远程：
   ```bash
   git remote add alice https://github.com/alice/nanoclaw.git
   git fetch alice skill/my-cool-feature
   git merge alice/skill/my-cool-feature
   ```
-- **Users can also add marketplaces manually.** Even without being listed in settings.json, users can run `/plugin marketplace add alice/nanoclaw-skills` to discover skills from any source.
-- **CI is per-fork.** Each community maintainer runs their own CI to keep their skill branches merged-forward. They can use the same GitHub Action as the upstream repo.
+- **用户也可以手动添加市场。** 即使未列在 settings.json 中，用户可以运行 `/plugin marketplace add alice/nanoclaw-skills` 从任何来源发现技能。
+- **CI 是每个 fork。** 每个社区维护者运行自己的 CI 以保持其技能分支合并向前。他们可以使用与上游仓库相同的 GitHub Action。
 
-## Flavors
+## 风味
 
-A flavor is a curated fork of NanoClaw — a combination of skills, custom changes, and configuration tailored for a specific use case (e.g., "NanoClaw for Sales," "NanoClaw Minimal," "NanoClaw for Developers").
+风味是 NanoClaw 的精心策划的 fork — 技能、自定义更改和配置的组合，针对特定用例（例如"NanoClaw for Sales"、"NanoClaw Minimal"、"NanoClaw for Developers"）。
 
-### Creating a flavor
+### 创建风味
 
-1. Fork `qwibitai/nanoclaw`
-2. Merge in the skills you want
-3. Make custom changes (trigger word, prompts, integrations, etc.)
-4. Your fork's `main` IS the flavor
+1. fork `qwibitai/nanoclaw`
+2. 合并你想要的技能
+3. 进行自定义更改（触发词、提示、集成等）
+4. 你的 fork 的 `main` 就是风味
 
-### Installing a flavor
+### 安装风味
 
-During `/setup`, users are offered a choice of flavors before any configuration happens. The setup skill reads `flavors.yaml` from the repo (shipped with upstream, always up to date) and presents options:
+在 `/setup` 期间，在配置发生之前向用户提供风味选择。设置技能从仓库中的 `flavors.yaml` 读取（与上游一起提供，始终保持最新）并提供选项：
 
-AskUserQuestion: "Start with a flavor or default NanoClaw?"
-- Default NanoClaw
-- NanoClaw for Sales — Gmail + Slack + CRM (maintained by alice)
-- NanoClaw Minimal — Telegram-only, lightweight (maintained by bob)
+AskUserQuestion："从风味或默认 NanoClaw 开始？"
+- 默认 NanoClaw
+- NanoClaw for Sales — Gmail + Slack + CRM（由 alice 维护）
+- NanoClaw Minimal — 仅 Telegram，轻量级（由 bob 维护）
 
-If a flavor is chosen:
-
-```bash
-git remote add <flavor-name> https://github.com/alice/nanoclaw.git
-git fetch <flavor-name> main
-git merge <flavor-name>/main
-```
-
-Then setup continues normally (dependencies, auth, container, service).
-
-**This choice is only offered on a fresh fork** — when the user's main matches or is close to upstream's main with no local commits. If `/setup` detects significant local changes (re-running setup on an existing install), it skips the flavor selection and goes straight to configuration.
-
-After installation, the user's fork has three remotes:
-- `origin` — their fork (push customizations here)
-- `upstream` — `qwibitai/nanoclaw` (core updates)
-- `<flavor-name>` — the flavor fork (flavor updates)
-
-### Updating a flavor
+如果选择风味：
 
 ```bash
-git fetch <flavor-name> main
-git merge <flavor-name>/main
+git remote add <风味名称> https://github.com/alice/nanoclaw.git
+git fetch <风味名称> main
+git merge <风味名称>/main
 ```
 
-The flavor maintainer keeps their fork updated (merging upstream, updating skills). Users pull flavor updates the same way they pull core updates.
+然后正常继续设置（依赖、认证、容器、服务）。
 
-### Flavors registry
+**此选择仅在新鲜 fork 时提供** — 当用户的 main 匹配或接近上游的 main 且无本地提交时。如果 `/setup` 检测到显著的本地更改（在现有安装上重新运行设置），它跳过风味选择，直接进入配置。
 
-`flavors.yaml` lives in the upstream repo:
+安装后，用户的 fork 有三个远程：
+- `origin` — 他们的 fork（推送自定义到这里）
+- `upstream` — `qwibitai/nanoclaw`（核心更新）
+- `<风味名称>` — 风味 fork（风味更新）
+
+### 更新风味
+
+```bash
+git fetch <风味名称> main
+git merge <风味名称>/main
+```
+
+风味维护者保持其 fork 更新（合并上游、更新技能）。用户拉取风味更新的方式与拉取核心更新相同。
+
+### 风味注册表
+
+`flavors.yaml` 位于上游仓库：
 
 ```yaml
 flavors:
   - name: NanoClaw for Sales
     repo: alice/nanoclaw
-    description: Gmail + Slack + CRM integration, daily pipeline summaries
+    description: Gmail + Slack + CRM 集成，每日管道摘要
     maintainer: alice
 
   - name: NanoClaw Minimal
     repo: bob/nanoclaw
-    description: Telegram-only, no container overhead
+    description: 仅 Telegram，无容器开销
     maintainer: bob
 ```
 
-Anyone can PR to add their flavor. The file is available locally when `/setup` runs since it's part of the cloned repo.
+任何人都可以 PR 添加他们的风味。文件在 `/setup` 运行时在本地可用，因为它是克隆仓库的一部分。
 
-### Discoverability
+### 可发现性
 
-- **During setup** — flavor selection is offered as part of the initial setup flow
-- **`/browse-flavors` skill** — reads `flavors.yaml` and presents options at any time
-- **GitHub topics** — flavor forks can tag themselves with `nanoclaw-flavor` for searchability
-- **Discord / website** — community-curated lists
+- **设置期间** — 风味选择在初始设置流程中提供
+- **`/browse-flavors` 技能** — 随时读取 `flavors.yaml` 并提供选项
+- **GitHub topics** — 风味 fork 可以用 `nanoclaw-flavor` 标签搜索
+- **Discord / 网站** — 社区策划列表
 
-## Migration
+## 迁移
 
-Migration from the old skills engine to branches is complete. All feature skills now live on `skill/*` branches, and the skills engine has been removed.
+从旧技能引擎到分支的迁移已完成。所有功能技能现在位于 `skill/*` 分支上，技能引擎已被移除。
 
-### Skill branches
+### 技能分支
 
-| Branch | Base | Description |
+| 分支 | 基础 | 描述 |
 |--------|------|-------------|
-| `skill/whatsapp` | `main` | WhatsApp channel |
-| `skill/telegram` | `main` | Telegram channel |
-| `skill/slack` | `main` | Slack channel |
-| `skill/discord` | `main` | Discord channel |
-| `skill/gmail` | `main` | Gmail channel |
-| `skill/voice-transcription` | `skill/whatsapp` | OpenAI Whisper voice transcription |
-| `skill/image-vision` | `skill/whatsapp` | Image attachment processing |
-| `skill/pdf-reader` | `skill/whatsapp` | PDF attachment reading |
-| `skill/local-whisper` | `skill/voice-transcription` | Local whisper.cpp transcription |
-| `skill/ollama-tool` | `main` | Ollama MCP server for local models |
-| `skill/apple-container` | `main` | Apple Container runtime |
-| `skill/reactions` | `main` | WhatsApp emoji reactions |
+| `skill/whatsapp` | `main` | WhatsApp 通道 |
+| `skill/telegram` | `main` | Telegram 通道 |
+| `skill/slack` | `main` | Slack 通道 |
+| `skill/discord` | `main` | Discord 通道 |
+| `skill/gmail` | `main` | Gmail 通道 |
+| `skill/voice-transcription` | `skill/whatsapp` | OpenAI Whisper 语音转录 |
+| `skill/image-vision` | `skill/whatsapp` | 图像附件处理 |
+| `skill/pdf-reader` | `skill/whatsapp` | PDF 附件阅读 |
+| `skill/local-whisper` | `skill/voice-transcription` | 本地 whisper.cpp 转录 |
+| `skill/ollama-tool` | `main` | Ollama MCP 服务器用于本地模型 |
+| `skill/apple-container` | `main` | Apple Container 运行时 |
+| `skill/reactions` | `main` | WhatsApp 表情符号反应 |
 
-### What was removed
+### 移除了什么
 
-- `skills-engine/` directory (entire engine)
-- `scripts/apply-skill.ts`, `scripts/uninstall-skill.ts`, `scripts/rebase.ts`
-- `scripts/fix-skill-drift.ts`, `scripts/validate-all-skills.ts`
-- `.github/workflows/skill-drift.yml`, `.github/workflows/skill-pr.yml`
-- All `add/`, `modify/`, `tests/`, and `manifest.yaml` from skill directories
-- `.nanoclaw/` state directory
+- `skills-engine/` 目录（整个引擎）
+- `scripts/apply-skill.ts`、`scripts/uninstall-skill.ts`、`scripts/rebase.ts`
+- `scripts/fix-skill-drift.ts`、`scripts/validate-all-skills.ts`
+- `.github/workflows/skill-drift.yml`、`.github/workflows/skill-pr.yml`
+- 来自技能目录的所有 `add/`、`modify/`、`tests/`、`manifest.yaml`
+- `.nanoclaw/` 状态目录
 
-Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-skills`) remain on main in `.claude/skills/`.
+操作技能（`setup`、`debug`、`update-nanoclaw`、`customize`、`update-skills`）保留在 `main` 的 `.claude/skills/` 中。
 
-## What Changes
+## 变化什么
 
-### README Quick Start
+### README 快速开始
 
-Before:
+之前：
 ```bash
 git clone https://github.com/qwibitai/NanoClaw.git
 cd NanoClaw
 claude
 ```
 
-After:
+之后：
 ```
-1. Fork qwibitai/nanoclaw on GitHub
-2. git clone https://github.com/<you>/nanoclaw.git
+1. 在 GitHub 上 fork qwibitai/nanoclaw
+2. git clone https://github.com/<你>/nanoclaw.git
 3. cd nanoclaw
 4. claude
 5. /setup
 ```
 
-### Setup skill (`/setup`)
+### 设置技能（`/setup`）
 
-Updates to the setup flow:
+设置流程更新：
 
-- Check if `upstream` remote exists; if not, add it: `git remote add upstream https://github.com/qwibitai/nanoclaw.git`
-- Check if `origin` points to the user's fork (not qwibitai). If it points to qwibitai, guide them through the fork migration.
-- **Install marketplace plugin:** `claude plugin install nanoclaw-skills@nanoclaw-skills --scope project` — makes all feature skills available (hot-loaded, no restart)
-- **Ask which channels to add:** present channel options (Discord, Telegram, Slack, WhatsApp, Gmail), run corresponding `/add-*` skills for selected channels
-- **Offer dependent skills:** after a channel is set up, offer relevant add-ons (e.g., Agent Swarm after Telegram, voice transcription after WhatsApp)
-- **Optionally enable community marketplaces:** ask if the user wants community skills, install those marketplace plugins too
+- 检查 `upstream` 远程是否存在；如果不存在，添加它：`git remote add upstream https://github.com/qwibitai/nanoclaw.git`
+- 检查 `origin` 是否指向用户的 fork（不是 qwibitai）。如果指向 qwibitai，指导他们通过 fork 迁移。
+- **安装市场插件：** `claude plugin install nanoclaw-skills@nanoclaw-skills --scope project` — 使所有功能技能可用（热加载，无需重启）
+- **询问添加哪些通道：** 提供通道选项（Discord、Telegram、Slack、WhatsApp、Gmail），运行相应的 `/add-*` 技能用于选定的通道
+- **提供依赖技能：** 通道设置好后，提供相关的附加组件（例如 Telegram 后的 Agent Swarm，WhatsApp 后的语音转录）
+- **可选启用社区市场：** 询问用户是否想要社区技能，安装这些市场插件
 
 ### `.claude/settings.json`
 
-Marketplace configuration so the official marketplace is auto-registered:
+市场配置，以便官方市场自动注册：
 
 ```json
 {
@@ -580,98 +580,98 @@ Marketplace configuration so the official marketplace is auto-registered:
 }
 ```
 
-### Skills directory on main
+### main 上的技能目录
 
-The `.claude/skills/` directory on `main` retains only operational skills (setup, debug, update-nanoclaw, customize, update-skills). Feature skills (add-discord, add-telegram, etc.) live in the marketplace repo, installed via `claude plugin install` during `/setup` or `/customize`.
+`main` 上的 `.claude/skills/` 目录仅保留操作技能（setup、debug、update-nanoclaw、customize、update-skills）。功能技能（add-discord、add-telegram 等）位于市场仓库，通过 `/setup` 或 `/customize` 期间的 `claude plugin install` 安装。
 
-### Skills engine removal
+### 技能引擎移除
 
-The following can be removed:
+以下可以移除：
 
-- `skills-engine/` — entire directory (apply, merge, replay, state, backup, etc.)
+- `skills-engine/` — 整个目录（应用、合并、重放、状态、备份等）
 - `scripts/apply-skill.ts`
 - `scripts/uninstall-skill.ts`
 - `scripts/fix-skill-drift.ts`
 - `scripts/validate-all-skills.ts`
-- `.nanoclaw/` — state directory
-- `add/` and `modify/` subdirectories from all skill directories
-- Feature skill SKILL.md files from `.claude/skills/` on main (they now live in the marketplace)
+- `.nanoclaw/` — 状态目录
+- 来自所有技能目录的 `add/` 和 `modify/` 子目录
+- 在 main 的 `.claude/skills/` 中的功能技能 SKILL.md 文件（它们现在位于市场）
 
-Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-skills`) remain on main in `.claude/skills/`.
+操作技能（`setup`、`debug`、`update-nanoclaw`、`customize`、`update-skills`）保留在 `main` 的 `.claude/skills/` 中。
 
-### New infrastructure
+### 新基础设施
 
-- **Marketplace repo** (`qwibitai/nanoclaw-skills`) — single Claude Code plugin bundling SKILL.md files for all feature skills
-- **CI GitHub Action** — merge-forward `main` into all `skill/*` branches on every push to `main`, using Claude (Haiku) for conflict resolution
-- **`/update-skills` skill** — checks for and applies skill branch updates using git history
-- **`CONTRIBUTORS.md`** — tracks skill contributors
+- **市场仓库**（`qwibitai/nanoclaw-skills`）— 捆绑所有功能技能的 SKILL.md 文件的单个 Claude Code 插件
+- **CI GitHub Action** — 在每次推送到 `main` 时将 `main` 合并到所有 `skill/*` 分支，使用 Claude（Haiku）进行冲突解决
+- **`/update-skills` 技能** — 使用 git 历史检查和合并技能分支更新
+- **`CONTRIBUTORS.md`** — 跟踪技能贡献者
 
-### Update skill (`/update-nanoclaw`)
+### 更新技能（`/update-nanoclaw`）
 
-The update skill gets simpler with the branch-based approach. The old skills engine required replaying all applied skills after merging core updates — that entire step disappears. Skill changes are already in the user's git history, so `git merge upstream/main` just works.
+更新技能使用基于分支的方法变得更简单。旧技能引擎需要在合并核心更新后重放所有应用的技能 — 整个步骤消失。技能更改已经在用户的 git 历史中，所以 `git merge upstream/main` 就可以工作。
 
-**What stays the same:**
-- Preflight (clean working tree, upstream remote)
-- Backup branch + tag
-- Preview (git log, git diff, file buckets)
-- Merge/cherry-pick/rebase options
-- Conflict preview (dry-run merge)
-- Conflict resolution
-- Build + test validation
-- Rollback instructions
+**保持不变的：**
+- 预检（干净的工作树、上游远程）
+- 备份分支 + 标签
+- 预览（git log、git diff、文件桶）
+- 合并/樱桃拣选/变基选项
+- 冲突预览（干运行合并）
+- 冲突解决
+- 构建 + 测试验证
+- 回滚指令
 
-**What's removed:**
-- Skill replay step (was needed by the old skills engine to re-apply skills after core update)
-- Re-running structured operations (npm deps, env vars — these are part of git history now)
+**移除的：**
+- 技能重放步骤（旧技能引擎在核心更新后重新应用技能所需）
+- 重新运行结构化操作（npm 依赖、环境变量 — 这些现在是 git 历史的一部分）
 
-**What's added:**
-- Optional step at the end: "Check for skill updates?" which runs the `/update-skills` logic
-- This checks whether any previously-merged skill branches have new commits (bug fixes, improvements to the skill itself — not just merge-forwards from main)
+**添加的：**
+- 最后可选步骤："检查技能更新？"运行 `/update-skills` 逻辑
+- 检查任何以前合并的技能分支是否有新提交（技能本身的错误修复、改进 — 不仅仅是与 main 的合并向前）
 
-**Why users don't need to re-merge skills after a core update:**
-When the user merged a skill branch, those changes became part of their git history. When they later merge `upstream/main`, git performs a normal three-way merge — the skill changes in their tree are untouched, and only core changes are brought in. The merge-forward CI ensures skill branches stay compatible with latest main, but that's for new users applying the skill fresh. Existing users who already merged the skill don't need to do anything.
+**为什么用户在核心更新后不需要重新合并技能：**
+当用户合并技能分支时，这些更改成为其 git 历史的一部分。当他们后来合并 `upstream/main` 时，git 执行正常的三方合并 — 树中的技能更改未触及，只引入核心更改。合并向前 CI 确保技能分支与最新的 main 兼容，但那是针对新鲜应用技能的新用户。已经合并技能的用户不需要做任何事情。
 
-Users only need to re-merge a skill branch if the skill itself was updated (not just merged-forward with main). The `/update-skills` check detects this.
+用户只需要重新合并技能分支，如果技能本身更新了（不仅仅是与 main 的合并向前）。`/update-skills` 检查检测到这一点。
 
-## Discord Announcement
+## Discord 公告
 
-### For existing users
+### 对于现有用户
 
-> **Skills are now git branches**
+> **技能现在是 git 分支**
 >
-> We've simplified how skills work in NanoClaw. Instead of a custom skills engine, skills are now git branches that you merge in.
+> 我们简化了 NanoClaw 中技能的工作方式。技能现在是 git 分支，你合并它们，而不是自定义技能引擎。
 >
-> **What this means for you:**
-> - Applying a skill: `git fetch upstream skill/discord && git merge upstream/skill/discord`
-> - Updating core: `git fetch upstream main && git merge upstream/main`
-> - Checking for skill updates: `/update-skills`
-> - No more `.nanoclaw/` state directory or skills engine
+> **这对你意味着什么：**
+> - 应用技能：`git fetch upstream skill/discord && git merge upstream/skill/discord`
+> - 更新核心：`git fetch upstream main && git merge upstream/main`
+> - 检查技能更新：`/update-skills`
+> - 不再有 `.nanoclaw/` 状态目录或技能引擎
 >
-> **We now recommend forking instead of cloning.** This gives you a remote to push your customizations to.
+> **我们现在推荐 fork 而不是克隆。** 这为你提供一个远程来推送你的自定义。
 >
-> **If you currently have a clone with local changes**, migrate to a fork:
-> 1. Fork `qwibitai/nanoclaw` on GitHub
-> 2. Run:
+> **如果你当前有带本地更改的克隆**，迁移到 fork：
+> 1. 在 GitHub 上 fork `qwibitai/nanoclaw`
+> 2. 运行：
 >    ```
 >    git remote rename origin upstream
->    git remote add origin https://github.com/<you>/nanoclaw.git
+>    git remote add origin https://github.com/<你>/nanoclaw.git
 >    git push --force origin main
 >    ```
->    This works even if you're way behind — just push your current state.
+>    这即使你远远落后也有效 — 只需推送你当前的状态。
 >
-> **If you previously applied skills via the old system**, your code changes are already in your working tree — nothing to redo. You can delete the `.nanoclaw/` directory. Future skills and updates use the branch-based approach.
+> **如果你以前通过旧系统应用技能**，你的代码更改已经在你的工作树中 — 无需重做。你可以删除 `.nanoclaw/` 目录。未来的技能和更新使用基于分支的方法。
 >
-> **Discovering skills:** Skills are now available through Claude Code's plugin marketplace. Run `/plugin` in Claude Code to browse and install available skills.
+> **发现技能：** 技能现在通过 Claude Code 的插件市场提供。在 Claude Code 中运行 `/plugin` 浏览和安装可用的技能。
 
-### For skill contributors
+### 对于技能贡献者
 
-> **Contributing skills**
+> **贡献技能**
 >
-> To contribute a skill:
-> 1. Fork `qwibitai/nanoclaw`
-> 2. Branch from `main` and make your code changes
-> 3. Open a regular PR
+> 要贡献技能：
+> 1. fork `qwibitai/nanoclaw`
+> 2. 从 `main` 分支并进行代码更改
+> 3. 打开常规的 PR
 >
-> That's it. We'll create a `skill/<name>` branch from your PR, add you to CONTRIBUTORS.md, and add the SKILL.md to the marketplace. CI automatically keeps skill branches merged-forward with `main` using Claude to resolve any conflicts.
+> 就这样。我们将从你的 PR 创建 `skill/<name>` 分支，将你添加到 CONTRIBUTORS.md，并将 SKILL.md 添加到市场。CI 使用 Claude 自动将技能分支与 main 合并向前，自动解决任何冲突。
 >
-> **Want to run your own skill marketplace?** Maintain skill branches on your fork and create a marketplace repo. Open a PR to add it to NanoClaw's auto-discovered marketplaces — or users can add it manually via `/plugin marketplace add`.
+> **想运行你自己的技能市场？** 在你的 fork 上维护技能分支并创建市场仓库。打开 PR 将其添加到 NanoClaw 的自动发现市场 — 或用户可以通过 `/plugin marketplace add` 手动添加它。

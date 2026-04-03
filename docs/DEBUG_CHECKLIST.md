@@ -1,77 +1,77 @@
-# NanoClaw Debug Checklist
+# NanoClaw 调试检查清单
 
-## Known Issues (2026-02-08)
+## 已知问题（2026-02-08）
 
-### 1. [FIXED] Resume branches from stale tree position
-When agent teams spawns subagent CLI processes, they write to the same session JSONL. On subsequent `query()` resumes, the CLI reads the JSONL but may pick a stale branch tip (from before the subagent activity), causing the agent's response to land on a branch the host never receives a `result` for. **Fix**: pass `resumeSessionAt` with the last assistant message UUID to explicitly anchor each resume.
+### 1. [已修复] 从过时的树位置恢复分支
+当 agent 团队生成子 agent CLI 进程时，它们写入同一个会话 JSONL。在随后的 `query()` 恢复时，CLI 读取 JSONL 但可能会选择一个过时的分支提示（在子 agent 活动之前），导致 agent 的响应落到一个主机从未收到 `result` 的分支上。**修复**：传递 `resumeSessionAt` 与最后一条 assistant 消息的 UUID，以明确锚定每次恢复。
 
-### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT (both 30 min)
-Both timers fire at the same time, so containers always exit via hard SIGKILL (code 137) instead of graceful `_close` sentinel shutdown. The idle timeout should be shorter (e.g., 5 min) so containers wind down between messages, while container timeout stays at 30 min as a safety net for stuck agents.
+### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT（两者都是 30 分钟）
+两个定时器同时触发，因此容器总是通过硬 SIGKILL（代码 137）退出，而不是优雅的 `_close` 哨兵关闭。空闲超时应该更短（例如 5 分钟），以便容器在消息之间降级，而容器超时保持在 30 分钟作为安全网。
 
-### 3. Cursor advanced before agent succeeds
-`processGroupMessages` advances `lastAgentTimestamp` before the agent runs. If the container times out, retries find no messages (cursor already past them). Messages are permanently lost on timeout.
+### 3. 在 agent 成功之前游标已前进
+`processGroupMessages` 在 agent 运行之前前进 `lastAgentTimestamp`。如果容器超时，重试会发现没有消息（游标已经过去）。消息在超时时永久丢失。
 
-### 4. Kubernetes image garbage collection deletes nanoclaw-agent image
+### 4. Kubernetes 镜像垃圾回收删除 nanoclaw-agent 镜像
 
-**Symptoms**: `Container exited with code 125: pull access denied for nanoclaw-agent` — the container image disappears overnight or after a few hours, even though you just built it.
+**症状**：`Container exited with code 125: pull access denied for nanoclaw-agent` — 容器镜像过夜或几小时后消失，即使你刚刚构建它。
 
-**Cause**: If your container runtime has Kubernetes enabled (Rancher Desktop enables it by default), the kubelet runs image garbage collection when disk usage exceeds 85%. NanoClaw containers are ephemeral (run and exit), so `nanoclaw-agent:latest` is never protected by a running container. The kubelet sees it as unused and deletes it — often overnight when no messages are being processed. Other images (docker-compose services) survive because they have long-running containers referencing them.
+**原因**：如果容器运行时启用了 Kubernetes（Rancher Desktop 默认启用它），kubelet 会在磁盘使用率超过 85% 时运行镜像垃圾回收。NanoClaw 容器是临时的（运行后退出），所以 `nanoclaw-agent:latest` 从没有被运行中的容器保护。kubelet 将其视为未使用并删除它 — 通常在没有消息处理时过夜发生。其他镜像（docker-compose 服务）存活是因为它们有长期运行的容器引用它们。
 
-**Fix**: Disable Kubernetes if you don't need it:
+**修复**：如果不需要 Kubernetes，请禁用它：
 ```bash
 # Rancher Desktop
 rdctl set --kubernetes-enabled=false
 
-# Then rebuild the container image
+# 然后重建容器镜像
 ./container/build.sh
 ```
 
-**Diagnosis**: Check the k3s log for image GC activity:
+**诊断**：检查 k3s 日志以查找镜像 GC 活动：
 ```bash
 grep -i "nanoclaw" ~/Library/Logs/rancher-desktop/k3s.log
-# Look for: "Removing image to free bytes" with the nanoclaw-agent image ID
+# 查找："Removing image to free bytes" 与 nanoclaw-agent 镜像 ID
 ```
 
-Check NanoClaw logs for image status:
+检查 NanoClaw 日志以查找镜像状态：
 ```bash
 grep -E "image found|image NOT found|image missing" logs/nanoclaw.log
 ```
 
-If you need Kubernetes enabled, set `CONTAINER_IMAGE` to an image stored in a registry that the kubelet won't GC, or raise the GC thresholds.
+如果需要启用 Kubernetes，将 `CONTAINER_IMAGE` 设置为存储在注册表中的镜像，kubelet 不会 GC，或提高 GC 阈值。
 
-## Quick Status Check
+## 快速状态检查
 
 ```bash
-# 1. Is the service running?
+# 1. 服务是否运行？
 launchctl list | grep nanoclaw
-# Expected: PID  0  com.nanoclaw (PID = running, "-" = not running, non-zero exit = crashed)
+# 预期：PID  0  com.nanoclaw（PID = 运行，"-" = 未运行，非零退出 = 崩溃）
 
-# 2. Any running containers?
+# 2. 有任何运行中的容器吗？
 docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
 
-# 3. Any stopped/orphaned containers?
+# 3. 有任何停止/孤立的容器吗？
 docker ps -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
 
-# 4. Recent errors in service log?
+# 4. 日志中最近的错误？
 grep -E 'ERROR|WARN' logs/nanoclaw.log | tail -20
 
-# 5. Are channels connected? (look for last connection event)
+# 5. 通道是否连接？（查找最后的连接事件）
 grep -E 'Connected|Connection closed|connection.*close|channel.*ready' logs/nanoclaw.log | tail -5
 
-# 6. Are groups loaded?
+# 6. 组是否加载？
 grep 'groupCount' logs/nanoclaw.log | tail -3
 ```
 
-## Session Transcript Branching
+## 会话转录分支
 
 ```bash
-# Check for concurrent CLI processes in session debug logs
+# 检查会话调试日志中的并发 CLI 进程
 ls -la data/sessions/<group>/.claude/debug/
 
-# Count unique SDK processes that handled messages
-# Each .txt file = one CLI subprocess. Multiple = concurrent queries.
+# 计算处理消息的唯一 SDK 进程数
+# 每个 .txt 文件 = 一个 CLI 子进程。多个 = 并发查询。
 
-# Check parentUuid branching in transcript
+# 检查转录中的 parentUuid 分支
 python3 -c "
 import json, sys
 lines = open('data/sessions/<group>/.claude/projects/-workspace-group/<session>.jsonl').read().strip().split('\n')
@@ -86,86 +86,86 @@ for i, line in enumerate(lines):
 "
 ```
 
-## Container Timeout Investigation
+## 容器超时调查
 
 ```bash
-# Check for recent timeouts
+# 检查最近的超时
 grep -E 'Container timeout|timed out' logs/nanoclaw.log | tail -10
 
-# Check container log files for the timed-out container
+# 检查超时容器的日志文件
 ls -lt groups/*/logs/container-*.log | head -10
 
-# Read the most recent container log (replace path)
+# 读取最近的容器日志（替换路径）
 cat groups/<group>/logs/container-<timestamp>.log
 
-# Check if retries were scheduled and what happened
+# 检查是否安排了重试以及发生了什么
 grep -E 'Scheduling retry|retry|Max retries' logs/nanoclaw.log | tail -10
 ```
 
-## Agent Not Responding
+## Agent 无响应
 
 ```bash
-# Check if messages are being received from channels
+# 检查是否从通道接收到消息
 grep 'New messages' logs/nanoclaw.log | tail -10
 
-# Check if messages are being processed (container spawned)
+# 检查是否处理了消息（生成了容器）
 grep -E 'Processing messages|Spawning container' logs/nanoclaw.log | tail -10
 
-# Check if messages are being piped to active container
+# 检查消息是否被传送到活动容器
 grep -E 'Piped messages|sendMessage' logs/nanoclaw.log | tail -10
 
-# Check the queue state — any active containers?
+# 检查队列状态 — 有任何活动容器吗？
 grep -E 'Starting container|Container active|concurrency limit' logs/nanoclaw.log | tail -10
 
-# Check lastAgentTimestamp vs latest message timestamp
+# 检查 lastAgentTimestamp 与最新消息时间戳
 sqlite3 store/messages.db "SELECT chat_jid, MAX(timestamp) as latest FROM messages GROUP BY chat_jid ORDER BY latest DESC LIMIT 5;"
 ```
 
-## Container Mount Issues
+## 容器挂载问题
 
 ```bash
-# Check mount validation logs (shows on container spawn)
+# 检查挂载验证日志（在容器生成时显示）
 grep -E 'Mount validated|Mount.*REJECTED|mount' logs/nanoclaw.log | tail -10
 
-# Verify the mount allowlist is readable
+# 验证挂载允许列表是否可读
 cat ~/.config/nanoclaw/mount-allowlist.json
 
-# Check group's container_config in DB
+# 检查数据库中组的 container_config
 sqlite3 store/messages.db "SELECT name, container_config FROM registered_groups;"
 
-# Test-run a container to check mounts (dry run)
-# Replace <group-folder> with the group's folder name
+# 测试运行容器以检查挂载（空运行）
+# 将 <group-folder> 替换为组的文件夹名称
 docker run -i --rm --entrypoint ls nanoclaw-agent:latest /workspace/extra/
 ```
 
-## Channel Auth Issues
+## 通道认证问题
 
 ```bash
-# Check if QR code was requested (means auth expired)
+# 检查是否请求了 QR 码（意味着认证过期）
 grep 'QR\|authentication required\|qr' logs/nanoclaw.log | tail -5
 
-# Check auth files exist
+# 检查认证文件是否存在
 ls -la store/auth/
 
-# Re-authenticate if needed
+# 如果需要重新认证
 npm run auth
 ```
 
-## Service Management
+## 服务管理
 
 ```bash
-# Restart the service
+# 重启服务
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
-# View live logs
+# 查看实时日志
 tail -f logs/nanoclaw.log
 
-# Stop the service (careful — running containers are detached, not killed)
+# 停止服务（注意 — 运行中的容器被分离，不会被杀死）
 launchctl bootout gui/$(id -u)/com.nanoclaw
 
-# Start the service
+# 启动服务
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nanoclaw.plist
 
-# Rebuild after code changes
+# 代码更改后重建
 npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```

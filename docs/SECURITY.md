@@ -1,124 +1,124 @@
-# NanoClaw Security Model
+# NanoClaw 安全模型
 
-## Trust Model
+## 信任模型
 
-| Entity | Trust Level | Rationale |
+| 实体 | 信任级别 | 理由 |
 |--------|-------------|-----------|
-| Main group | Trusted | Private self-chat, admin control |
-| Non-main groups | Untrusted | Other users may be malicious |
-| Container agents | Sandboxed | Isolated execution environment |
-| Incoming messages | User input | Potential prompt injection |
+| 主组 | 受信任 | 私人自我聊天，管理控制 |
+| 非主组 | 不受信任 | 其他用户可能是恶意的 |
+| 容器 agent | 沙盒化 | 隔离的执行环境 |
+| 传入消息 | 用户输入 | 潜在的提示注入 |
 
-## Security Boundaries
+## 安全边界
 
-### 1. Container Isolation (Primary Boundary)
+### 1. 容器隔离（主要边界）
 
-Agents execute in containers (lightweight Linux VMs), providing:
-- **Process isolation** - Container processes cannot affect the host
-- **Filesystem isolation** - Only explicitly mounted directories are visible
-- **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
-- **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+Agent 在容器（轻量级 Linux VM）中执行，提供：
+- **进程隔离** — 容器进程无法影响主机
+- **文件系统隔离** — 只有明确挂载的目录是可见的
+- **非 root 执行** — 以非特权 `node` 用户（uid 1000）运行
+- **临时容器** — 每次调用使用新鲜环境（`--rm`）
 
-This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
+这是主要的安全边界。攻击面通过挂载的内容来限制，而不是依赖于应用级权限检查。
 
-### 2. Mount Security
+### 2. 挂载安全
 
-**External Allowlist** - Mount permissions stored at `~/.config/nanoclaw/mount-allowlist.json`, which is:
-- Outside project root
-- Never mounted into containers
-- Cannot be modified by agents
+**外部允许列表** — 挂载权限存储在 `~/.config/nanoclaw/mount-allowlist.json`，位于：
+- 项目根目录之外
+- 从不安载到容器中
+- 无法被 agent 修改
 
-**Default Blocked Patterns:**
+**默认阻止的模式：**
 ```
 .ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
 credentials, .env, .netrc, .npmrc, id_rsa, id_ed25519,
 private_key, .secret
 ```
 
-**Protections:**
-- Symlink resolution before validation (prevents traversal attacks)
-- Container path validation (rejects `..` and absolute paths)
-- `nonMainReadOnly` option forces read-only for non-main groups
+**保护：**
+- 挂载前解析符号链接（防止遍历攻击）
+- 容器路径验证（拒绝 `..` 和绝对路径）
+- `nonMainReadOnly` 选项对非主组强制只读
 
-**Read-Only Project Root:**
+**只读项目根目录：**
 
-The main group's project root is mounted read-only. Writable paths the agent needs (group folder, IPC, `.claude/`) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart.
+主组的项目根目录以只读方式挂载。agent 需要的可写路径（组文件夹、IPC、`.claude/`）分别挂载。这防止 agent 修改主机应用代码（`src/`、`dist/`、`package.json` 等），否则会在下次重启时完全绕过沙盒。
 
-### 3. Session Isolation
+### 3. 会话隔离
 
-Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
-- Groups cannot see other groups' conversation history
-- Session data includes full message history and file contents read
-- Prevents cross-group information disclosure
+每个组在 `data/sessions/{group}/.claude/` 有独立的 Claude 会话：
+- 组无法看到其他组的对话历史
+- 会话数据包含完整的消息历史和读取的文件内容
+- 防止跨组信息泄露
 
-### 4. IPC Authorization
+### 4. IPC 授权
 
-Messages and task operations are verified against group identity:
+消息和任务操作根据组身份进行验证：
 
-| Operation | Main Group | Non-Main Group |
+| 操作 | 主组 | 非主组 |
 |-----------|------------|----------------|
-| Send message to own chat | ✓ | ✓ |
-| Send message to other chats | ✓ | ✗ |
-| Schedule task for self | ✓ | ✓ |
-| Schedule task for others | ✓ | ✗ |
-| View all tasks | ✓ | Own only |
-| Manage other groups | ✓ | ✗ |
+| 向自己的聊天发送消息 | ✓ | ✓ |
+| 向其他聊天发送消息 | ✓ | ✗ |
+| 为自己的组安排任务 | ✓ | ✓ |
+| 为其他组安排任务 | ✓ | ✗ |
+| 查看所有任务 | ✓ | 仅限自己的 |
+| 管理其他组 | ✓ | ✗ |
 
-### 5. Credential Isolation (OneCLI Agent Vault)
+### 5. 凭证隔离（OneCLI Agent Vault）
 
-Real API credentials **never enter containers**. NanoClaw uses [OneCLI's Agent Vault](https://github.com/onecli/onecli) to proxy outbound requests and inject credentials at the gateway level.
+真实的 API 凭证**永远不会进入容器**。NanoClaw 使用 [OneCLI 的 Agent Vault](https://github.com/onecli/onecli) 代理出站请求并在网关级别注入凭证。
 
-**How it works:**
-1. Credentials are registered once with `onecli secrets create`, stored and managed by OneCLI
-2. When NanoClaw spawns a container, it calls `applyContainerConfig()` to route outbound HTTPS through the OneCLI gateway
-3. The gateway matches requests by host and path, injects the real credential, and forwards
-4. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
+**工作原理：**
+1. 凭证通过 `onecli secrets create` 注册一次，由 OneCLI 存储和管理
+2. 当 NanoClaw 生成容器时，它调用 `applyContainerConfig()` 将出站 HTTPS 路由到 OneCLI 网关
+3. 网关根据主机和路径匹配请求，注入真实凭证，并转发
+4. Agent 无法发现真实凭证 — 不在环境、stdin、文件或 `/proc` 中
 
-**Per-agent policies:**
-Each NanoClaw group gets its own OneCLI agent identity. This allows different credential policies per group (e.g. your sales agent vs. support agent). OneCLI supports rate limits, and time-bound access and approval flows are on the roadmap.
+**每个 agent 的策略：**
+每个 NanoClaw 组获得自己的 OneCLI agent 身份。这允许每个组有不同的凭证策略（例如你的销售 agent 与支持 agent）。OneCLI 支持速率限制，基于时间的访问和审批流程正在路线图上。
 
-**NOT Mounted:**
-- Channel auth sessions (`store/auth/`) — host only
-- Mount allowlist — external, never mounted
-- Any credentials matching blocked patterns
-- `.env` is shadowed with `/dev/null` in the project root mount
+**未挂载：**
+- 通道认证会话（`store/auth/`）— 仅限主机
+- 挂载允许列表 — 外部，从不安载
+- 任何匹配阻止模式的凭证
+- `.env` 在项目根目录挂载中被 `/dev/null` 遮蔽
 
-## Privilege Comparison
+## 权限比较
 
-| Capability | Main Group | Non-Main Group |
+| 能力 | 主组 | 非主组 |
 |------------|------------|----------------|
-| Project root access | `/workspace/project` (ro) | None |
-| Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
-| Global memory | Implicit via project | `/workspace/global` (ro) |
-| Additional mounts | Configurable | Read-only unless allowed |
-| Network access | Unrestricted | Unrestricted |
-| MCP tools | All | All |
+| 项目根目录访问 | `/workspace/project` (ro) | 无 |
+| 组文件夹 | `/workspace/group` (rw) | `/workspace/group` (rw) |
+| 全局内存 | 隐式通过项目 | `/workspace/global` (ro) |
+| 额外挂载 | 可配置 | 只读，除非允许 |
+| 网络访问 | 不受限制 | 不受限制 |
+| MCP 工具 | 所有 | 所有 |
 
-## Security Architecture Diagram
+## 安全架构图
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                        UNTRUSTED ZONE                             │
-│  Incoming Messages (potentially malicious)                         │
+│                        不受信任区域                                │
+│  传入消息（可能是恶意的）                                           │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
-                                 ▼ Trigger check, input escaping
+                                 ▼ 触发检查，输入转义
 ┌──────────────────────────────────────────────────────────────────┐
-│                     HOST PROCESS (TRUSTED)                        │
-│  • Message routing                                                │
-│  • IPC authorization                                              │
-│  • Mount validation (external allowlist)                          │
-│  • Container lifecycle                                            │
-│  • OneCLI Agent Vault (injects credentials, enforces policies)   │
+│                     主机进程（受信任）                              │
+│  • 消息路由                                                       │
+│  • IPC 授权                                                       │
+│  • 挂载验证（外部允许列表）                                        │
+│  • 容器生命周期                                                   │
+│  • OneCLI Agent Vault（注入凭证，执行策略）                       │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
-                                 ▼ Explicit mounts only, no secrets
+                                 ▼ 明确挂载，无凭证
 ┌──────────────────────────────────────────────────────────────────┐
-│                CONTAINER (ISOLATED/SANDBOXED)                     │
-│  • Agent execution                                                │
-│  • Bash commands (sandboxed)                                      │
-│  • File operations (limited to mounts)                            │
-│  • API calls routed through OneCLI Agent Vault                   │
-│  • No real credentials in environment or filesystem              │
+│                容器（隔离/沙盒）                                    │
+│  • Agent 执行                                                      │
+│  • Bash 命令（沙盒化）                                             │
+│  • 文件操作（限于挂载）                                            │
+│  • 通过 OneCLI Agent Vault 路由的 API 调用                        │
+│  • 环境或文件系统中无真实凭证                                     │
 └──────────────────────────────────────────────────────────────────┘
 ```
