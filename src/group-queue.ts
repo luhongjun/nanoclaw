@@ -4,6 +4,7 @@ import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
+import { stopContainer } from './container-runtime.js';
 
 interface QueuedTask {
   id: string;
@@ -223,6 +224,35 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
+
+      // 主动停止容器（如果还在运行）
+      if (state.containerName) {
+        try {
+          stopContainer(state.containerName);
+          logger.info(
+            { containerName: state.containerName },
+            'Container cleanup',
+          );
+        } catch (err) {
+          // Container already exited (e.g., timeout killed it) — this is expected
+          const isNotFound =
+            err instanceof Error &&
+            (err.message.includes('No such container') ||
+              err.message.includes('is already in progress'));
+          if (!isNotFound) {
+            logger.warn(
+              { containerName: state.containerName, err },
+              'Container cleanup failed',
+            );
+          } else {
+            logger.debug(
+              { containerName: state.containerName },
+              'Container already exited',
+            );
+          }
+        }
+      }
+
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
@@ -250,6 +280,35 @@ export class GroupQueue {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
       state.active = false;
+
+      // 主动停止容器（如果还在运行）
+      if (state.containerName) {
+        try {
+          stopContainer(state.containerName);
+          logger.info(
+            { containerName: state.containerName },
+            'Container cleanup',
+          );
+        } catch (err) {
+          // Container already exited (e.g., timeout killed it) — this is expected
+          const isNotFound =
+            err instanceof Error &&
+            (err.message.includes('No such container') ||
+              err.message.includes('is already in progress'));
+          if (!isNotFound) {
+            logger.warn(
+              { containerName: state.containerName, err },
+              'Container cleanup failed',
+            );
+          } else {
+            logger.debug(
+              { containerName: state.containerName },
+              'Container already exited',
+            );
+          }
+        }
+      }
+
       state.isTaskContainer = false;
       state.runningTaskId = null;
       state.process = null;

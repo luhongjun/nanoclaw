@@ -12,6 +12,7 @@ import {
   getAllTasks,
   getDueTasks,
   getTaskById,
+  getSessionByGroupFolder,
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
@@ -151,9 +152,14 @@ async function runTask(
   let error: string | null = null;
 
   // For group context mode, use the group's current session
+  // If task has chat_jid, use it directly; otherwise fallback to group_folder
   const sessions = deps.getSessions();
-  const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  let sessionId: string | undefined;
+  if (task.context_mode === 'group') {
+    sessionId = task.chat_jid
+      ? sessions[task.chat_jid]
+      : getSessionByGroupFolder(task.group_folder);
+  }
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the

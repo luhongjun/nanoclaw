@@ -292,20 +292,133 @@ class WeComChannel implements Channel {
           timestamp,
           is_from_me: false,
           is_bot_message: false,
+          msgtype: 'text',
+          metadata: {
+            req_id: reqId,
+            msgid: msgId,
+            aibotid: body.aibotid,
+            chattype: body.chattype,
+            response_url: body.response_url,
+            response_url_expires: body.response_url
+              ? Date.now() + 3600000
+              : undefined,
+            from: body.from,
+          },
+          raw_payload: message,
         };
         this.onMessage(chatJid, newMessage);
         console.log('[WeCom] Message emitted to router');
       } else if (body.msgtype === 'image') {
         console.log('[WeCom] Image message received, url:', body.image?.url);
+        const newMessage: NewMessage = {
+          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+          chat_jid: chatJid,
+          sender: userId,
+          sender_name: senderName,
+          content: `[图片] ${body.image?.url || ''}`,
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+          msgtype: 'image',
+          metadata: {
+            req_id: reqId,
+            msgid: msgId,
+            aibotid: body.aibotid,
+            chattype: body.chattype,
+            response_url: body.response_url,
+            response_url_expires: body.response_url
+              ? Date.now() + 3600000
+              : undefined,
+            from: body.from,
+            image: body.image,
+          },
+          raw_payload: message,
+        };
+        this.onMessage(chatJid, newMessage);
       } else if (body.msgtype === 'file') {
         console.log(
           '[WeCom] File message received, filename:',
           body.file?.filename,
         );
+        const newMessage: NewMessage = {
+          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+          chat_jid: chatJid,
+          sender: userId,
+          sender_name: senderName,
+          content: `[文件] ${body.file?.filename || 'unknown'}`,
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+          msgtype: 'file',
+          metadata: {
+            req_id: reqId,
+            msgid: msgId,
+            aibotid: body.aibotid,
+            chattype: body.chattype,
+            response_url: body.response_url,
+            response_url_expires: body.response_url
+              ? Date.now() + 3600000
+              : undefined,
+            from: body.from,
+            file: body.file,
+          },
+          raw_payload: message,
+        };
+        this.onMessage(chatJid, newMessage);
       } else if (body.msgtype === 'voice') {
         console.log('[WeCom] Voice message received');
+        const newMessage: NewMessage = {
+          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+          chat_jid: chatJid,
+          sender: userId,
+          sender_name: senderName,
+          content: '[语音]',
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+          msgtype: 'voice',
+          metadata: {
+            req_id: reqId,
+            msgid: msgId,
+            aibotid: body.aibotid,
+            chattype: body.chattype,
+            response_url: body.response_url,
+            response_url_expires: body.response_url
+              ? Date.now() + 3600000
+              : undefined,
+            from: body.from,
+            voice: body.voice,
+          },
+          raw_payload: message,
+        };
+        this.onMessage(chatJid, newMessage);
       } else if (body.msgtype === 'mixed') {
         console.log('[WeCom] Mixed message received');
+        const newMessage: NewMessage = {
+          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+          chat_jid: chatJid,
+          sender: userId,
+          sender_name: senderName,
+          content: '[混合消息]',
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+          msgtype: 'mixed',
+          metadata: {
+            req_id: reqId,
+            msgid: msgId,
+            aibotid: body.aibotid,
+            chattype: body.chattype,
+            response_url: body.response_url,
+            response_url_expires: body.response_url
+              ? Date.now() + 3600000
+              : undefined,
+            from: body.from,
+            mixed: body.mixed,
+          },
+          raw_payload: message,
+        };
+        this.onMessage(chatJid, newMessage);
       } else {
         console.log('[WeCom] Unknown message type:', body.msgtype);
       }
@@ -369,8 +482,10 @@ class WeComChannel implements Channel {
 
         const eventContent = event.Content || event.content;
         if (eventType === 'text' && eventContent) {
+          const reqId = message.headers?.req_id;
+          const msgId = body.msgid;
           const newMessage: NewMessage = {
-            id: `wecom:${fromUser}:${eventTime}:${event.MessageId}`,
+            id: `wecom:${fromUser}:${eventTime}:${event.MessageId || generateReqId('msg')}`,
             chat_jid: chatJid,
             sender: fromUser,
             sender_name: fromUser,
@@ -378,6 +493,24 @@ class WeComChannel implements Channel {
             timestamp,
             is_from_me: false,
             is_bot_message: false,
+            msgtype: 'text',
+            metadata: {
+              req_id: reqId,
+              msgid: msgId,
+              aibotid: body.aibotid,
+              chattype: 'single',
+              response_url: body.response_url,
+              response_url_expires: body.response_url
+                ? Date.now() + 3600000
+                : undefined,
+              event: {
+                EventType: eventType,
+                FromUserName: fromUser,
+                CreateTime: eventTime,
+                MessageId: event.MessageId,
+              },
+            },
+            raw_payload: message,
           };
           this.onMessage(chatJid, newMessage);
           console.log('[WeCom] Event message emitted to router');

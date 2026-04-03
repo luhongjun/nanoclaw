@@ -16,7 +16,23 @@ export function formatMessages(
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+
+    // Format content based on message type
+    let formattedContent = m.content;
+    if (m.msgtype === 'image' && m.metadata?.image?.url) {
+      formattedContent = `[图片](${m.metadata.image.url})`;
+    } else if (m.msgtype === 'file' && m.metadata?.file) {
+      const filename = m.metadata.file.filename || 'unknown';
+      const fileurl = m.metadata.file.fileurl || '';
+      formattedContent = `[文件] ${filename}${fileurl ? `(${fileurl})` : ''}`;
+    } else if (m.msgtype === 'voice' && m.metadata?.voice?.url) {
+      formattedContent = `[语音](${m.metadata.voice.url})`;
+    } else if (m.msgtype === 'mixed') {
+      const mixedContent = m.metadata?.mixed?.content || [];
+      formattedContent = `[混合消息] 包含 ${mixedContent.length || 0} 个元素`;
+    }
+
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(formattedContent)}</message>`;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
