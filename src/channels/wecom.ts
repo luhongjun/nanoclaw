@@ -114,7 +114,9 @@ class WeComChannel implements Channel {
         // This is NORMAL behavior on startup - our first connection succeeded, server is cleaning up
         // DO NOT reconnect here - the working connection is already active
         if (reason.includes('New connection established')) {
-          console.log('[WeCom] This is normal - our first connection succeeded, server cleaned up the old one');
+          console.log(
+            '[WeCom] This is normal - our first connection succeeded, server cleaned up the old one',
+          );
           // The working connection is already established, no need to reconnect
         }
       });
@@ -219,20 +221,33 @@ class WeComChannel implements Channel {
     try {
       // Try to use pending reply for passive response first
       const pending = pendingReplies.get(userId);
-      console.log('[WeCom] sendMessage called for:', userId, 'pending:', pending);
+      console.log(
+        '[WeCom] sendMessage called for:',
+        userId,
+        'pending:',
+        pending,
+      );
       const replyReqId = reqId || pending?.reqId;
-      console.log('[WeCom] replyReqId:', replyReqId, 'pending.msgId:', pending?.msgId);
+      console.log(
+        '[WeCom] replyReqId:',
+        replyReqId,
+        'pending.msgId:',
+        pending?.msgId,
+      );
 
       if (replyReqId && pending?.msgId) {
         // Passive reply: use reply() method with correct frame structure
         // SDK expects: reply(frame: { headers: { req_id } }, body: ...)
         console.log('[WeCom] Sending passive reply with req_id:', replyReqId);
-        await this.wsClient.reply({
-          headers: { req_id: replyReqId },
-        }, {
-          msgtype: 'markdown',
-          markdown: { content: text },
-        });
+        await this.wsClient.reply(
+          {
+            headers: { req_id: replyReqId },
+          },
+          {
+            msgtype: 'markdown',
+            markdown: { content: text },
+          },
+        );
         console.log('[WeCom] Message sent via SDK reply to', userId);
       } else {
         // Active push: use sendMessage() method
@@ -259,7 +274,9 @@ class WeComChannel implements Channel {
   }
 
   async syncGroups(force?: boolean): Promise<void> {
-    console.log('[WeCom] syncGroups called (not implemented for individual chats)');
+    console.log(
+      '[WeCom] syncGroups called (not implemented for individual chats)',
+    );
   }
 
   private scheduleReconnect(): void {
