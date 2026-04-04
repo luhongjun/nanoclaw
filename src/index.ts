@@ -1,15 +1,94 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 import { OneCLI } from '@onecli-sh/sdk';
+
+// ES module dirname replacement
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ─────────────────────────────────────────────────────────────
+// Single-instance protection (pidfile)
+// Prevents multiple `npm start` instances from running simultaneously
+// which causes Docker container name conflicts and OOM issues.
+// ─────────────────────────────────────────────────────────────
+const PIDFILE = path.join(__dirname, '../nanoclaw.pid');
+
+function checkSingleInstance(): void {
+  if (fs.existsSync(PIDFILE)) {
+    const oldPidStr = fs.readFileSync(PIDFILE, 'utf-8').trim();
+    const oldPid = parseInt(oldPidStr, 10);
+    if (!isNaN(oldPid)) {
+      try {
+        // Check if process is running
+        process.kill(oldPid, 0);
+        // If we get here, old process is still running
+        console.error(
+          `[FATAL] Another instance is already running (PID: ${oldPid}).`,
+          'If this is a stale pidfile, remove it manually:',
+          PIDFILE,
+        );
+        process.exit(1);
+      } catch {
+        // Old process is dead, remove stale pidfile
+        logger.warn(
+          { stalePid: oldPid },
+          'Found stale pidfile, removing',
+        );
+        try {
+          fs.unlinkSync(PIDFILE);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  }
+}
+
+function writePidFile(): void {
+  try {
+    fs.writeFileSync(PIDFILE, process.pid.toString(), 'utf-8');
+    logger.info({ pid: process.pid, pidfile: PIDFILE }, 'PID file written');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to write pidfile, single-instance protection disabled');
+  }
+}
+
+function cleanupPidFile(): void {
+  try {
+    // Only delete pidfile if it contains our PID
+    // This prevents a second instance from deleting the first instance's pidfile
+    if (fs.existsSync(PIDFILE)) {
+      const existingPid = fs.readFileSync(PIDFILE, 'utf-8').trim();
+      if (existingPid === process.pid.toString()) {
+        fs.unlinkSync(PIDFILE);
+        logger.info('PID file cleaned up');
+      }
+    }
+  } catch {
+    // Ignore cleanup errors (file may not exist or may be locked)
+  }
+}
+
+// Install cleanup handlers before any work begins
+process.on('exit', cleanupPidFile);
+process.on('SIGINT', () => { cleanupPidFile(); process.exit(); });
+process.on('SIGTERM', () => { cleanupPidFile(); process.exit(); });
+// Windows specific: handle Ctrl+Break
+if (process.platform === 'win32') {
+  process.on('SIGBREAK', () => { cleanupPidFile(); process.exit(); });
+}
 
 // Global error handlers to catch uncaught exceptions
 process.on('uncaughtException', (err) => {
   console.error('[FATAL] Uncaught Exception:', err);
+  cleanupPidFile();
   process.exit(1);
 });
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+  cleanupPidFile();
   process.exit(1);
 });
 
@@ -580,6 +659,10 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  // Single-instance check - must run before any work begins
+  checkSingleInstance();
+  writePidFile();
+
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');

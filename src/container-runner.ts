@@ -235,6 +235,10 @@ async function buildContainerArgs(
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Memory limit: 2GB (agent needs ~1.5GB for Node.js + Chromium + SDK)
+  // Exit code 137 = SIGKILL from OOM killer - this was the root cause of container deaths
+  args.push('--memory', '2g', '--memory-swap', '2g');
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
@@ -360,6 +364,31 @@ export async function runContainerAgent(
     },
     'Spawning container agent',
   );
+
+  // Pre-cleanup: Remove any existing container with the same name to prevent conflicts
+  // This handles race conditions when multiple service instances run simultaneously
+  try {
+    const { execSync } = require('child_process');
+    execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerName}`, {
+      stdio: 'pipe',
+      timeout: 5000,
+    });
+    // Wait for container to be fully removed (Docker --rm can have slight delay)
+    for (let i = 0; i < 10; i++) {
+      try {
+        const check = execSync(`${CONTAINER_RUNTIME_BIN} ps -q --filter name=^${containerName}$`, {
+          stdio: 'pipe',
+          timeout: 2000,
+        }).toString().trim();
+        if (check === '') break;
+      } catch {
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  } catch {
+    // Container doesn't exist or already removed - this is fine
+  }
 
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });

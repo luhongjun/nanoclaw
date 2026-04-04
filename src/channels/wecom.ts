@@ -29,25 +29,25 @@ class WeComChannel implements Channel {
   private config: WeComConfig;
   private onMessage: (chatJid: string, msg: NewMessage) => void;
   private onChatMetadata: (
-    chatJid: string,
-    timestamp: string,
-    name?: string,
-    channel?: string,
-    isGroup?: boolean,
+      chatJid: string,
+      timestamp: string,
+      name?: string,
+      channel?: string,
+      isGroup?: boolean,
   ) => void;
   private wsClient: AiBot.WSClient | null = null;
   private connected = false;
   private reconnectAttempts = 0;
 
   constructor(
-    onMessage: (chatJid: string, msg: NewMessage) => void,
-    onChatMetadata: (
-      chatJid: string,
-      timestamp: string,
-      name?: string,
-      channel?: string,
-      isGroup?: boolean,
-    ) => void,
+      onMessage: (chatJid: string, msg: NewMessage) => void,
+      onChatMetadata: (
+          chatJid: string,
+          timestamp: string,
+          name?: string,
+          channel?: string,
+          isGroup?: boolean,
+      ) => void,
   ) {
     const botId = WECOM_BOT_ID;
     const secret = WECOM_SECRET;
@@ -55,7 +55,7 @@ class WeComChannel implements Channel {
 
     if (!botId || !secret) {
       console.warn(
-        '[WeCom] Missing required environment variables: WECOM_BOT_ID, WECOM_SECRET',
+          '[WeCom] Missing required environment variables: WECOM_BOT_ID, WECOM_SECRET',
       );
       throw new Error('Missing WeCom credentials');
     }
@@ -65,13 +65,13 @@ class WeComChannel implements Channel {
       secret,
       wsUrl,
       heartbeatIntervalMs: parseInt(
-        process.env.WECOM_HEARTBEAT_INTERVAL_MS || '30000',
+          process.env.WECOM_HEARTBEAT_INTERVAL_MS || '30000',
       ),
       reconnectInitialDelayMs: parseInt(
-        process.env.WECOM_RECONNECT_INITIAL_DELAY_MS || '1000',
+          process.env.WECOM_RECONNECT_INITIAL_DELAY_MS || '1000',
       ),
       reconnectMaxDelayMs: parseInt(
-        process.env.WECOM_RECONNECT_MAX_DELAY_MS || '30000',
+          process.env.WECOM_RECONNECT_MAX_DELAY_MS || '30000',
       ),
     };
     this.onMessage = onMessage;
@@ -115,7 +115,7 @@ class WeComChannel implements Channel {
         // DO NOT reconnect here - the working connection is already active
         if (reason.includes('New connection established')) {
           console.log(
-            '[WeCom] This is normal - our first connection succeeded, server cleaned up the old one',
+              '[WeCom] This is normal - our first connection succeeded, server cleaned up the old one',
           );
           // The working connection is already established, no need to reconnect
         }
@@ -163,8 +163,8 @@ class WeComChannel implements Channel {
     if (!body) return;
 
     const timestamp = body.create_time
-      ? new Date(body.create_time * 1000).toISOString()
-      : new Date().toISOString();
+        ? new Date(body.create_time * 1000).toISOString()
+        : new Date().toISOString();
 
     const userId = body.from?.userid || 'unknown';
     const chatJid = `wecom:${userId}`;
@@ -203,85 +203,7 @@ class WeComChannel implements Channel {
         raw_payload: frame,
       };
       this.onMessage(chatJid, newMessage);
-      console.log('[WeCom] Text message emitted to router');
-    }
-
-    // Handle image messages
-    if (body.msgtype === 'image' && body.image?.url) {
-      const newMessage: NewMessage = {
-        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
-        chat_jid: chatJid,
-        sender: userId,
-        sender_name: senderName,
-        content: `[图片] ${body.image.url}`,
-        timestamp,
-        is_from_me: false,
-        is_bot_message: false,
-        msgtype: 'image',
-        metadata: {
-          req_id: reqId,
-          msgid: msgId,
-          aibotid: body.aibotid,
-          chattype: body.chattype,
-          from: body.from,
-          image: body.image,
-        },
-        raw_payload: frame,
-      };
-      this.onMessage(chatJid, newMessage);
-      console.log('[WeCom] Image message emitted to router');
-    }
-
-    // Handle file messages
-    if (body.msgtype === 'file' && body.file?.filename) {
-      const newMessage: NewMessage = {
-        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
-        chat_jid: chatJid,
-        sender: userId,
-        sender_name: senderName,
-        content: `[文件] ${body.file.filename}`,
-        timestamp,
-        is_from_me: false,
-        is_bot_message: false,
-        msgtype: 'file',
-        metadata: {
-          req_id: reqId,
-          msgid: msgId,
-          aibotid: body.aibotid,
-          chattype: body.chattype,
-          from: body.from,
-          file: body.file,
-        },
-        raw_payload: frame,
-      };
-      this.onMessage(chatJid, newMessage);
-      console.log('[WeCom] File message emitted to router');
-    }
-
-    // Handle voice messages
-    if (body.msgtype === 'voice' && body.voice?.url) {
-      const newMessage: NewMessage = {
-        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
-        chat_jid: chatJid,
-        sender: userId,
-        sender_name: senderName,
-        content: `[语音]`,
-        timestamp,
-        is_from_me: false,
-        is_bot_message: false,
-        msgtype: 'voice',
-        metadata: {
-          req_id: reqId,
-          msgid: msgId,
-          aibotid: body.aibotid,
-          chattype: body.chattype,
-          from: body.from,
-          voice: body.voice,
-        },
-        raw_payload: frame,
-      };
-      this.onMessage(chatJid, newMessage);
-      console.log('[WeCom] Voice message emitted to router');
+      console.log('[WeCom] Message emitted to router');
     }
   }
 
@@ -300,17 +222,17 @@ class WeComChannel implements Channel {
       // Try to use pending reply for passive response first
       const pending = pendingReplies.get(userId);
       console.log(
-        '[WeCom] sendMessage called for:',
-        userId,
-        'pending:',
-        pending,
+          '[WeCom] sendMessage called for:',
+          userId,
+          'pending:',
+          pending,
       );
       const replyReqId = reqId || pending?.reqId;
       console.log(
-        '[WeCom] replyReqId:',
-        replyReqId,
-        'pending.msgId:',
-        pending?.msgId,
+          '[WeCom] replyReqId:',
+          replyReqId,
+          'pending.msgId:',
+          pending?.msgId,
       );
 
       if (replyReqId && pending?.msgId) {
@@ -318,13 +240,13 @@ class WeComChannel implements Channel {
         // SDK expects: reply(frame: { headers: { req_id } }, body: ...)
         console.log('[WeCom] Sending passive reply with req_id:', replyReqId);
         await this.wsClient.reply(
-          {
-            headers: { req_id: replyReqId },
-          },
-          {
-            msgtype: 'markdown',
-            markdown: { content: text },
-          },
+            {
+              headers: { req_id: replyReqId },
+            },
+            {
+              msgtype: 'markdown',
+              markdown: { content: text },
+            },
         );
         console.log('[WeCom] Message sent via SDK reply to', userId);
       } else {
@@ -353,18 +275,18 @@ class WeComChannel implements Channel {
 
   async syncGroups(force?: boolean): Promise<void> {
     console.log(
-      '[WeCom] syncGroups called (not implemented for individual chats)',
+        '[WeCom] syncGroups called (not implemented for individual chats)',
     );
   }
 
   private scheduleReconnect(): void {
     const delay = Math.min(
-      (this.config.reconnectInitialDelayMs || 1000) *
+        (this.config.reconnectInitialDelayMs || 1000) *
         Math.pow(2, this.reconnectAttempts),
-      this.config.reconnectMaxDelayMs || 30000,
+        this.config.reconnectMaxDelayMs || 30000,
     );
     console.log(
-      `[WeCom] Reconnecting in ${delay}ms (attempt ${++this.reconnectAttempts})`,
+        `[WeCom] Reconnecting in ${delay}ms (attempt ${++this.reconnectAttempts})`,
     );
     setTimeout(() => {
       this.connect().catch((err) => {
