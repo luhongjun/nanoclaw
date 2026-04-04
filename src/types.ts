@@ -51,7 +51,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
-  msgtype?: string; // Message type: text/image/file/voice/mixed
+  msgtype?: string; // Message type: text/image/file/voice/mixed/video/event
   metadata?: Record<string, any>; // Channel-specific metadata (req_id, response_url, etc.)
   raw_payload?: any; // Original raw message payload
 }

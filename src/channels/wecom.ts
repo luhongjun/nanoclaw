@@ -152,8 +152,23 @@ class WeComChannel implements Channel {
         this.handleSDKMessage(frame);
       });
 
+      this.wsClient.on('message.video', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received video message');
+        this.handleSDKMessage(frame);
+      });
+
       this.wsClient.on('event.enter_chat', (frame: WsFrame) => {
         console.log('[WeCom] SDK received enter_chat event');
+        this.handleSDKMessage(frame);
+      });
+
+      this.wsClient.on('event.template_card_event', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received template_card_event');
+        this.handleSDKMessage(frame);
+      });
+
+      this.wsClient.on('event.feedback_event', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received feedback_event');
         this.handleSDKMessage(frame);
       });
 
@@ -314,6 +329,111 @@ class WeComChannel implements Channel {
       };
       this.onMessage(chatJid, newMessage);
       console.log('[WeCom] Mixed message emitted to router');
+    }
+    // Handle video messages
+    else if (body.msgtype === 'video' && body.video?.url) {
+      const newMessage: NewMessage = {
+        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+        chat_jid: chatJid,
+        sender: userId,
+        sender_name: senderName,
+        content: '', // Video messages have no text content
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+        msgtype: 'video',
+        metadata: {
+          req_id: reqId,
+          msgid: msgId,
+          aibotid: body.aibotid,
+          chattype: body.chattype,
+          from: body.from,
+          video: body.video,
+        },
+        raw_payload: frame,
+      };
+      this.onMessage(chatJid, newMessage);
+      console.log('[WeCom] Video message emitted to router');
+    }
+    // Handle event messages
+    else if (body.msgtype === 'event' && body.event) {
+      const eventType = body.event.eventtype || body.event.EventType;
+      console.log('[WeCom] Received event:', eventType);
+
+      if (eventType === 'enter_chat') {
+        const newMessage: NewMessage = {
+          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('event')}`,
+          chat_jid: chatJid,
+          sender: userId,
+          sender_name: senderName,
+          content: `[事件] 用户进入会话`,
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+          msgtype: 'event',
+          metadata: {
+            req_id: reqId,
+            msgid: msgId,
+            aibotid: body.aibotid,
+            chattype: body.chattype,
+            from: body.from,
+            event: body.event,
+          },
+          raw_payload: frame,
+        };
+        this.onMessage(chatJid, newMessage);
+        console.log('[WeCom] enter_chat event emitted to router');
+      }
+      // Handle template_card_event
+      else if (eventType === 'template_card_event') {
+        const newMessage: NewMessage = {
+          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('event')}`,
+          chat_jid: chatJid,
+          sender: userId,
+          sender_name: senderName,
+          content: `[事件] 卡片按钮点击`,
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+          msgtype: 'event',
+          metadata: {
+            req_id: reqId,
+            msgid: msgId,
+            aibotid: body.aibotid,
+            chattype: body.chattype,
+            from: body.from,
+            event: body.event,
+          },
+          raw_payload: frame,
+        };
+        this.onMessage(chatJid, newMessage);
+        console.log('[WeCom] template_card_event emitted to router');
+      }
+      // Handle feedback_event
+      else if (eventType === 'feedback_event') {
+        const newMessage: NewMessage = {
+          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('event')}`,
+          chat_jid: chatJid,
+          sender: userId,
+          sender_name: senderName,
+          content: `[事件] 用户反馈`,
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+          msgtype: 'event',
+          metadata: {
+            req_id: reqId,
+            msgid: msgId,
+            aibotid: body.aibotid,
+            chattype: body.chattype,
+            from: body.from,
+            event: body.event,
+          },
+          raw_payload: frame,
+        };
+        this.onMessage(chatJid, newMessage);
+        console.log('[WeCom] feedback_event emitted to router');
+      }
     }
   }
 

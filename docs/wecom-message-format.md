@@ -189,7 +189,7 @@ await wsClient.sendMessage(userId, {
 | `from` | object | 是 | 发送者信息 |
 | `from.userid` | string | 是 | 发送者用户 ID |
 | `from.name` | string | 否 | 发送者姓名 |
-| `msgtype` | string | 是 | 消息类型：`text` / `image` / `file` / `voice` / `mixed` / `event` |
+| `msgtype` | string | 是 | 消息类型：`text` / `image` / `file` / `voice` / `mixed` / `video` / `event` |
 | `response_url` | string | 否 | 回复消息的 HTTPS 回调 URL，1 小时有效期 |
 | `create_time` | number | 是 | 消息创建时间戳（秒级 Unix 时间戳） |
 
@@ -232,6 +232,34 @@ await wsClient.sendMessage(userId, {
 | `mixed` | object | 混合消息内容 |
 | `mixed.content` | array | 多种类型内容的数组 |
 
+#### video 类型
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `video` | object | 视频消息内容 |
+| `video.url` | string | 视频 URL |
+| `video.aeskey` | string | 视频解密 key |
+
+#### event 类型
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `event` | object | 事件详情 |
+| `event.eventtype` | string | 事件类型：`enter_chat` / `template_card_event` / `feedback_event` / `disconnected_event` |
+
+##### template_card_event 特有字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `event.event_key` | string | 用户点击的按钮 key |
+| `event.task_id` | string | 任务 ID |
+
+##### feedback_event 特有字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| 无额外字段 | - | 仅包含 eventtype 标识事件类型 |
+
 ### body 字段（aibot_event_callback）
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -253,7 +281,10 @@ await wsClient.sendMessage(userId, {
 
 | 事件类型 | 说明 | 处理建议 |
 |----------|------|----------|
-| `disconnected_event` | 连接断开事件 | 保持连接，等待消息，不要立即重连 |
+| `enter_chat` | 用户当天首次进入机器人单聊会话 | 记录用户进入事件，可选：发送欢迎语 |
+| `template_card_event` | 用户点击模板卡片按钮 | 根据 button_id 处理用户交互 |
+| `feedback_event` | 用户对机器人回复进行反馈 | 记录反馈用于优化 |
+| `disconnected_event` | 连接断开事件（新连接建立时推送给旧连接） | 保持连接，等待消息，不要立即重连 |
 | `text` | 文本事件 | 按文本消息处理 `event.Content` |
 
 ---

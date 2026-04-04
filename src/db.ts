@@ -347,7 +347,7 @@ export function getNewMessages(
   const placeholders = jids.map(() => '?').join(',');
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
-  // Allow non-text messages (image/file/voice/mixed) even if content is empty.
+  // Allow non-text messages (image/file/voice/mixed/video) even if content is empty.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
@@ -355,7 +355,7 @@ export function getNewMessages(
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
-        AND (content != '' AND content IS NOT NULL OR msgtype IN ('image', 'file', 'voice', 'mixed'))
+        AND (content != '' AND content IS NOT NULL OR msgtype IN ('image', 'file', 'voice', 'mixed', 'video', 'event'))
       ORDER BY timestamp DESC
       LIMIT ?
     ) ORDER BY timestamp
@@ -403,7 +403,7 @@ export function getMessagesSince(
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
-  // Allow non-text messages (image/file/voice/mixed) even if content is empty.
+  // Allow non-text messages (image/file/voice/mixed/video) even if content is empty.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
@@ -411,7 +411,7 @@ export function getMessagesSince(
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
-        AND (content != '' AND content IS NOT NULL OR msgtype IN ('image', 'file', 'voice', 'mixed'))
+        AND (content != '' AND content IS NOT NULL OR msgtype IN ('image', 'file', 'voice', 'mixed', 'video', 'event'))
       ORDER BY timestamp DESC
       LIMIT ?
     ) ORDER BY timestamp
