@@ -34,8 +34,7 @@ export interface ContainerAcquireResult {
 
 class ContainerPool {
   private containers = new Map<string, PooledContainer>();
-  private globalCleanupTimer: ReturnType<typeof setInterval> | null =
-    null;
+  private globalCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Check if the pool is enabled. */
   get enabled(): boolean {
@@ -76,7 +75,7 @@ class ContainerPool {
     if (existing) {
       logger.info(
         { chatJid, containerName },
-        'Existing container unhealthy, will recreate'
+        'Existing container unhealthy, will recreate',
       );
       this.containers.delete(chatJid);
     }
@@ -95,7 +94,7 @@ class ContainerPool {
 
     logger.info(
       { chatJid, containerName, poolSize: this.containers.size },
-      'Creating new container'
+      'Creating new container',
     );
     return { containerName, isNew: true, process: null };
   }
@@ -129,7 +128,11 @@ class ContainerPool {
         });
       }, CONTAINER_AUTO_SHUTDOWN_MS);
       logger.info(
-        { chatJid, containerName: entry.name, shutdownMs: CONTAINER_AUTO_SHUTDOWN_MS },
+        {
+          chatJid,
+          containerName: entry.name,
+          shutdownMs: CONTAINER_AUTO_SHUTDOWN_MS,
+        },
         'Container marked idle, auto-shutdown scheduled',
       );
     }
@@ -141,7 +144,10 @@ class ContainerPool {
     if (entry?.shutdownTimer) {
       clearTimeout(entry.shutdownTimer);
       entry.shutdownTimer = null;
-      logger.info({ chatJid }, 'Auto-shutdown cancelled - container being reused');
+      logger.info(
+        { chatJid },
+        'Auto-shutdown cancelled - container being reused',
+      );
     }
   }
 
@@ -222,15 +228,18 @@ class ContainerPool {
   /** Get pool stats for monitoring. */
   getStats(): {
     total: number;
-    active: number
-    idle: number
+    active: number;
+    idle: number;
     containers: Array<{ name: string; idleMs: number; isActive: boolean }>;
   } {
     const now = Date.now();
     let active = 0;
     let idle = 0;
-    const containers: Array<{ name: string; idleMs: number; isActive: boolean }> =
-      [];
+    const containers: Array<{
+      name: string;
+      idleMs: number;
+      isActive: boolean;
+    }> = [];
 
     for (const [, entry] of this.containers) {
       if (entry.isActive) active++;
@@ -246,5 +255,5 @@ class ContainerPool {
   }
 }
 
- // Singleton instance
+// Singleton instance
 export const containerPool = new ContainerPool();

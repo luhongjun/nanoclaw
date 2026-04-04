@@ -32,10 +32,7 @@ import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 import { readEnvFile } from './env.js';
-import {
-  containerPool,
-  ContainerAcquireResult,
-} from './container-pool.js';
+import { containerPool, ContainerAcquireResult } from './container-pool.js';
 import { CONTAINER_POOL_ENABLED } from './config.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
