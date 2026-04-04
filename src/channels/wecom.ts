@@ -203,7 +203,85 @@ class WeComChannel implements Channel {
         raw_payload: frame,
       };
       this.onMessage(chatJid, newMessage);
-      console.log('[WeCom] Message emitted to router');
+      console.log('[WeCom] Text message emitted to router');
+    }
+
+    // Handle image messages
+    if (body.msgtype === 'image' && body.image?.url) {
+      const newMessage: NewMessage = {
+        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+        chat_jid: chatJid,
+        sender: userId,
+        sender_name: senderName,
+        content: `[图片] ${body.image.url}`,
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+        msgtype: 'image',
+        metadata: {
+          req_id: reqId,
+          msgid: msgId,
+          aibotid: body.aibotid,
+          chattype: body.chattype,
+          from: body.from,
+          image: body.image,
+        },
+        raw_payload: frame,
+      };
+      this.onMessage(chatJid, newMessage);
+      console.log('[WeCom] Image message emitted to router');
+    }
+
+    // Handle file messages
+    if (body.msgtype === 'file' && body.file?.filename) {
+      const newMessage: NewMessage = {
+        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+        chat_jid: chatJid,
+        sender: userId,
+        sender_name: senderName,
+        content: `[文件] ${body.file.filename}`,
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+        msgtype: 'file',
+        metadata: {
+          req_id: reqId,
+          msgid: msgId,
+          aibotid: body.aibotid,
+          chattype: body.chattype,
+          from: body.from,
+          file: body.file,
+        },
+        raw_payload: frame,
+      };
+      this.onMessage(chatJid, newMessage);
+      console.log('[WeCom] File message emitted to router');
+    }
+
+    // Handle voice messages
+    if (body.msgtype === 'voice' && body.voice?.url) {
+      const newMessage: NewMessage = {
+        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+        chat_jid: chatJid,
+        sender: userId,
+        sender_name: senderName,
+        content: `[语音]`,
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+        msgtype: 'voice',
+        metadata: {
+          req_id: reqId,
+          msgid: msgId,
+          aibotid: body.aibotid,
+          chattype: body.chattype,
+          from: body.from,
+          voice: body.voice,
+        },
+        raw_payload: frame,
+      };
+      this.onMessage(chatJid, newMessage);
+      console.log('[WeCom] Voice message emitted to router');
     }
   }
 
