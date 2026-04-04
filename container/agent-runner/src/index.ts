@@ -339,6 +339,20 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+  // Log prompt sent to LLM for debugging
+  log('=== LLM PROMPT START ===');
+  log(`Session: ${sessionId || 'new'} | ResumeAt: ${resumeAt || 'latest'}`);
+  log(`Prompt length: ${prompt.length} chars`);
+  // Truncate long prompts in log (show first 2000 chars + tail)
+  if (prompt.length > 2000) {
+    log(`Prompt preview (first 2000 chars):\n${prompt.slice(0, 2000)}`);
+    log(`... [truncated ${prompt.length - 2000} chars] ...`);
+    log(`Prompt tail (last 500 chars):\n${prompt.slice(-500)}`);
+  } else {
+    log(`Prompt content:\n${prompt}`);
+  }
+  log('=== LLM PROMPT END ===');
+
   const stream = new MessageStream();
   stream.push(prompt);
 
