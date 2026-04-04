@@ -32,6 +32,11 @@ import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 import { readEnvFile } from './env.js';
+import {
+  containerPool,
+  ContainerAcquireResult,
+} from './container-pool.js';
+import { CONTAINER_POOL_ENABLED } from './config.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -232,8 +237,13 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
+  usePool: boolean = false,
 ): Promise<string[]> {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  // When pool is enabled, don't use --rm so containers persist for reuse
+  const baseArgs = usePool
+    ? ['run', '-i', '--name', containerName]
+    : ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = baseArgs;
 
   // Memory limit: 2GB (agent needs ~1.5GB for Node.js + Chromium + SDK)
   // Exit code 137 = SIGKILL from OOM killer - this was the root cause of container deaths
@@ -336,10 +346,23 @@ export async function runContainerAgent(
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
+
+  // Try to acquire existing container from pool (for tracking purposes)
+  const acquired = containerPool.acquire(group, input.chatJid, containerName);
+
+  // Note: Container reuse via IPC is not yet implemented.
+  // For now, the pool tracks containers and cleans up idle ones,
+  // but each message still spawns a fresh container.
+  // TODO: Implement true container reuse by keeping stdin open and
+  // appending messages via IPC.
+
+  // Create new container
+  const usePool = CONTAINER_POOL_ENABLED;
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,
     agentIdentifier,
+    usePool,
   );
 
   logger.debug(
@@ -351,6 +374,7 @@ export async function runContainerAgent(
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
       containerArgs: containerArgs.join(' '),
+      usePool,
     },
     'Container mount configuration',
   );
@@ -361,38 +385,40 @@ export async function runContainerAgent(
       containerName,
       mountCount: mounts.length,
       isMain: input.isMain,
+      usePool,
     },
     'Spawning container agent',
   );
 
-  // Pre-cleanup: Remove any existing container with the same name to prevent conflicts
-  // This handles race conditions when multiple service instances run simultaneously
-  try {
-    const { execSync } = require('child_process');
-    execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerName}`, {
-      stdio: 'pipe',
-      timeout: 5000,
-    });
-    // Wait for container to be fully removed (Docker --rm can have slight delay)
-    for (let i = 0; i < 10; i++) {
-      try {
-        const check = execSync(
-          `${CONTAINER_RUNTIME_BIN} ps -q --filter name=^${containerName}$`,
-          {
-            stdio: 'pipe',
-            timeout: 2000,
-          },
-        )
-          .toString()
-          .trim();
-        if (check === '') break;
-      } catch {
-        break;
+  // Pre-cleanup only if not using pool (pool handles cleanup)
+  if (!usePool) {
+    try {
+      const { execSync } = require('child_process');
+      execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerName}`, {
+        stdio: 'pipe',
+        timeout: 5000,
+      });
+      // Wait for container to be fully removed (Docker --rm can have slight delay)
+      for (let i = 0; i < 10; i++) {
+        try {
+          const check = execSync(
+            `${CONTAINER_RUNTIME_BIN} ps -q --filter name=^${containerName}$`,
+            {
+              stdio: 'pipe',
+              timeout: 2000,
+            },
+          )
+            .toString()
+            .trim();
+          if (check === '') break;
+        } catch {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    } catch {
+      // Container doesn't exist or already removed - this is fine
     }
-  } catch {
-    // Container doesn't exist or already removed - this is fine
   }
 
   const logsDir = path.join(groupDir, 'logs');
@@ -457,6 +483,8 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
+            // Update pool activity timestamp for idle tracking
+            containerPool.touch(input.chatJid);
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
@@ -667,10 +695,19 @@ export async function runContainerAgent(
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
         outputChain.then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
-          );
+          // When using pool, mark container as idle instead of closing
+          if (usePool) {
+            containerPool.release(input.chatJid);
+            logger.info(
+              { group: group.name, duration, newSessionId, containerName },
+              'Container marked as idle (pool mode)',
+            );
+          } else {
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+          }
           resolve({
             status: 'success',
             result: null,

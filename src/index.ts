@@ -127,6 +127,7 @@ import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
+import { containerPool } from './container-pool.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -665,6 +666,10 @@ function recoverPendingMessages(): void {
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
+  // Start container pool global cleanup timer (orphan detection)
+  containerPool.startGlobalCleanupTimer();
+  // Clean up any orphaned containers not tracked by the pool
+  containerPool.cleanupOrphans();
 }
 
 async function main(): Promise<void> {
@@ -689,6 +694,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
+    await containerPool.shutdown();
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
   };
