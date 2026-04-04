@@ -10,6 +10,7 @@
 |------|------|
 | [session-architecture.md](session-architecture.md) | 会话架构设计：私聊按人、群聊按群、消息完整存储 |
 | [wecom-message-format.md](wecom-message-format.md) | 企业微信消息格式规范：WebSocket 协议详解 |
+| [WECOM-SDK-INTEGRATION.md](WECOM-SDK-INTEGRATION.md) | 企业微信 SDK 集成指南：踩坑经验和最佳实践 |
 | [SPEC.md](SPEC.md) | 技术规格说明书 |
 | [SECURITY.md](SECURITY.md) | 安全模型说明 |
 | [REQUIREMENTS.md](REQUIREMENTS.md) | 需求文档 |
@@ -44,6 +45,12 @@
   - 消息类型详解
   - 回复机制
 
+- [WECOM-SDK-INTEGRATION.md](WECOM-SDK-INTEGRATION.md) — 企业微信 SDK 集成指南
+  - 快速开始
+  - 踩坑经验（reply() 参数结构、disconnected_event 处理）
+  - 完整实现示例
+  - 错误码速查表
+
 - [skills-as-branches.md](skills-as-branches.md) — Skills 系统
   - Skill 设计原理
   - 开发规范
@@ -77,5 +84,8 @@
 
 | 日期 | 文档 | 更新内容 |
 |------|------|----------|
+| 2026-04-04 | WECOM-SDK-INTEGRATION.md | 新增：SDK 集成踩坑经验文档 |
+| 2026-04-04 | wecom-message-format.md | 更新：SDK 集成方式、reply() 参数结构 |
+| 2026-04-04 | session-architecture.md | 更新：添加 SDK 回复链路 |
 | 2026-04-03 | session-architecture.md | 新增：会话架构设计文档 |
 | 2026-04-03 | wecom-message-format.md | 新增：企业微信消息格式规范 |

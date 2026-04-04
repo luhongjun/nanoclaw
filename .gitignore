@@ -8,6 +8,7 @@ dist/
 store/
 data/
 logs/
+*.db
 
 # Groups - only track base structure and specific CLAUDE.md files
 groups/*
@@ -24,6 +25,7 @@ groups/global/*
 
 # Temp files
 .tmp-*
+*.log
 
 # OS
 .DS_Store

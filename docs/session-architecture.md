@@ -259,15 +259,17 @@ export function getSessionByGroupFolder(
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  1. 企业微信 WebSocket 推送                                         │
+│  1. 企业微信 WebSocket 推送 (官方 SDK)                              │
 │  cmd: aibot_msg_callback                                          │
 │  body: { from: { userid }, text: { content }, ... }               │
+│  headers: { req_id: "xxx" }                                       │
 └────────────────┬─────────────────────────────────────────────────┘
                  │
                  ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  2. 通道层 (src/channels/wecom.ts)                                │
-│  - 解析 JSON 体                                                    │
+│  - SDK 事件监听：wsClient.on('message.text', ...)                  │
+│  - 缓存 pending reply: { reqId, msgId }                           │
 │  - 构建 NewMessage 对象                                           │
 │  - 填充 metadata 和 raw_payload                                   │
 │  - 调用回调 onMessage(chatJid, msg)                              │
@@ -295,6 +297,15 @@ export function getSessionByGroupFolder(
 │  - runContainerAgent(sessionId, ...)                             │
 │  - 容器内 Claude 处理消息                                          │
 │  - 输出新 session_id → setSession(chatJid, newId)                │
+└────────────────┬─────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  6. 回复消息 (src/channels/wecom.ts:sendMessage)                  │
+│  - 获取缓存的 pending reply: { reqId, msgId }                     │
+│  - SDK reply(): wsClient.reply({ headers: { req_id } }, body)   │
+│  - msgtype: 'markdown' (WeCom 要求)                                │
+│  - 等待 ack 确认                                                   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -392,7 +403,7 @@ sqlite3 store/messages.db "SELECT id, msgtype, content, metadata FROM messages W
 
 - `src/db.ts` — 数据库操作和 session 管理
 - `src/index.ts` — 消息路由和 session 调用
-- `src/channels/wecom.ts` — 企业微信消息解析和 metadata 填充
+- `src/channels/wecom.ts` — 企业微信消息解析和 metadata 填充（使用官方 SDK）
 - `src/router.ts` — 消息格式化（支持多媒体）
 - `src/task-scheduler.ts` — 定时任务 session 适配
 
@@ -402,4 +413,5 @@ sqlite3 store/messages.db "SELECT id, msgtype, content, metadata FROM messages W
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-04-04 | 1.1 | 更新消息流程：添加官方 SDK 回复链路 |
 | 2026-04-03 | 1.0 | 初始版本：Chat-Centric 会话模型 + 完整消息存储 |

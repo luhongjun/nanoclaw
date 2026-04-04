@@ -1,16 +1,15 @@
 import { registerChannel } from './registry.js';
-import WebSocket from 'ws';
 import crypto from 'crypto';
 import { Channel, NewMessage } from '../types.js';
 import { WECOM_BOT_ID, WECOM_SECRET } from '../config.js';
+import AiBot from '@wecom/aibot-node-sdk';
+import type { WsFrame } from '@wecom/aibot-node-sdk';
 
-// Cache response URLs for single chats - expires after 1 hour
-const responseUrlCache = new Map<string, { url: string; expiresAt: number }>();
 // Cache pending reply requests - map userId to { reqId, msgId } for passive reply
 const pendingReplies = new Map<string, { reqId: string; msgId: string }>();
 
 /**
- * Generate req_id for WebSocket frames
+ * Generate req_id for frames
  */
 function generateReqId(prefix = 'req'): string {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -36,9 +35,8 @@ class WeComChannel implements Channel {
     channel?: string,
     isGroup?: boolean,
   ) => void;
-  private ws: WebSocket | null = null;
+  private wsClient: AiBot.WSClient | null = null;
   private connected = false;
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
 
   constructor(
@@ -59,7 +57,6 @@ class WeComChannel implements Channel {
       console.warn(
         '[WeCom] Missing required environment variables: WECOM_BOT_ID, WECOM_SECRET',
       );
-      // Return null from factory, not constructor
       throw new Error('Missing WeCom credentials');
     }
 
@@ -91,128 +88,178 @@ class WeComChannel implements Channel {
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      // WeCom AI Bot WebSocket URL (no credentials in URL)
-      const wsUrl = this.config.wsUrl || 'wss://openws.work.weixin.qq.com';
-      console.log('[WeCom] Connecting to:', wsUrl);
+      // Initialize official SDK client
+      this.wsClient = new AiBot.WSClient({
+        botId: this.config.botId,
+        secret: this.config.secret,
+        wsUrl: this.config.wsUrl,
+      });
 
-      this.ws = new WebSocket(wsUrl);
-
-      this.ws.on('open', () => {
-        console.log('[WeCom] WebSocket connected, sending authentication...');
+      // Setup SDK event listeners
+      this.wsClient.on('authenticated', () => {
+        console.log('[WeCom] SDK authenticated!');
         this.connected = true;
         this.reconnectAttempts = 0;
-        // Send authentication frame after connection established
-        this.sendAuth();
-        // Resolve immediately; authentication result will be handled by message handler
         resolve();
       });
 
-      this.ws.on('message', async (data: WebSocket.RawData) => {
-        try {
-          const raw = data.toString();
-          console.log('[WeCom] Raw WebSocket message received:', raw);
-          const message = JSON.parse(raw);
-          console.log(
-            '[WeCom] Parsed message:',
-            JSON.stringify(message, null, 2),
-          );
-
-          // Handle authentication response (errcode: 0 means success)
-          // Auth response format: { headers: { req_id }, errcode: 0, errmsg: "ok" }
-          if (
-            message.errcode === 0 &&
-            message.headers?.req_id?.startsWith('auth_')
-          ) {
-            console.log('[WeCom] Authentication successful!');
-            this.startHeartbeat();
-            return;
-          }
-
-          // Handle authentication failure
-          if (message.errcode !== undefined && message.errcode !== 0) {
-            console.error('[WeCom] Authentication failed:', message.errmsg);
-            this.connected = false;
-            this.scheduleReconnect();
-            return;
-          }
-
-          // Handle pong response to heartbeat
-          // Pong format: { headers: { req_id: "ping_..." }, errcode: 0, errmsg: "ok" }
-          if (
-            message.headers?.req_id?.startsWith('ping_') &&
-            message.errcode === 0
-          ) {
-            console.log('[WeCom] Received pong response');
-            return;
-          }
-
-          await this.handleMessage(message);
-        } catch (error) {
-          console.error('[WeCom] Error parsing message:', error);
-        }
+      this.wsClient.on('connected', () => {
+        console.log('[WeCom] SDK connected');
       });
 
-      this.ws.on('close', (code: number, reason: Buffer) => {
-        console.log(`[WeCom] WebSocket closed (code=${code}), reconnecting...`);
+      this.wsClient.on('disconnected', (reason: string) => {
+        console.log('[WeCom] SDK disconnected:', reason);
         this.connected = false;
-        if (this.heartbeatTimer) {
-          clearInterval(this.heartbeatTimer);
-          this.heartbeatTimer = null;
+        // When server sends disconnected_event, it means "a new connection has taken over"
+        // This is NORMAL behavior on startup - our first connection succeeded, server is cleaning up
+        // DO NOT reconnect here - the working connection is already active
+        if (reason.includes('New connection established')) {
+          console.log('[WeCom] This is normal - our first connection succeeded, server cleaned up the old one');
+          // The working connection is already established, no need to reconnect
         }
-        this.scheduleReconnect();
       });
 
-      this.ws.on('error', (error: Error) => {
-        console.error('[WeCom] WebSocket error:', error);
+      this.wsClient.on('error', (error: Error) => {
+        console.error('[WeCom] SDK error:', error);
         reject(error);
       });
+
+      // Setup message listeners
+      this.wsClient.on('message.text', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received text message');
+        this.handleSDKMessage(frame);
+      });
+
+      this.wsClient.on('message.image', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received image message');
+        this.handleSDKMessage(frame);
+      });
+
+      this.wsClient.on('message.file', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received file message');
+        this.handleSDKMessage(frame);
+      });
+
+      this.wsClient.on('message.voice', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received voice message');
+        this.handleSDKMessage(frame);
+      });
+
+      this.wsClient.on('event.enter_chat', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received enter_chat event');
+        this.handleSDKMessage(frame);
+      });
+
+      // Connect SDK
+      console.log('[WeCom] Connecting via SDK...');
+      this.wsClient.connect();
     });
   }
 
-  /**
-   * Send authentication frame
-   * Format: { cmd: "aibot_subscribe", headers: { req_id }, body: { secret, bot_id } }
-   * Note: Enterprise WeChat API expects snake_case field names
-   */
-  private sendAuth(): void {
-    const reqId = generateReqId('auth');
-    const authFrame = {
-      cmd: 'aibot_subscribe',
-      headers: { req_id: reqId },
-      body: {
-        secret: this.config.secret,
-        bot_id: this.config.botId, // Enterprise WeChat API uses snake_case
-      },
-    };
-    console.log('[WeCom] Sending authentication frame');
-    this.ws?.send(JSON.stringify(authFrame));
-  }
+  private handleSDKMessage(frame: WsFrame): void {
+    const body = frame.body;
+    if (!body) return;
 
-  /**
-   * Send heartbeat ping
-   * Format: { cmd: "ping", headers: { req_id } }
-   */
-  private sendHeartbeat(): void {
-    const reqId = generateReqId('ping');
-    const pingFrame = {
-      cmd: 'ping',
-      headers: { req_id: reqId },
-    };
-    console.log('[WeCom] Sending heartbeat ping');
-    this.ws?.send(JSON.stringify(pingFrame));
-  }
+    const timestamp = body.create_time
+      ? new Date(body.create_time * 1000).toISOString()
+      : new Date().toISOString();
 
-  private startHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
+    const userId = body.from?.userid || 'unknown';
+    const chatJid = `wecom:${userId}`;
+    const senderName = body.from?.name || userId;
+
+    // Emit chat metadata
+    this.onChatMetadata(chatJid, timestamp, senderName, 'wecom', false);
+    console.log('[WeCom] Chat metadata emitted for:', chatJid);
+
+    const reqId = frame.headers?.req_id;
+    const msgId = body.msgid;
+    if (reqId && msgId) {
+      pendingReplies.set(userId, { reqId, msgId });
+      console.log('[WeCom] Cached pending reply for:', userId, 'reqId:', reqId);
     }
-    this.heartbeatTimer = setInterval(() => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.sendHeartbeat();
+
+    // Handle text messages
+    if (body.msgtype === 'text' && body.text?.content) {
+      const newMessage: NewMessage = {
+        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
+        chat_jid: chatJid,
+        sender: userId,
+        sender_name: senderName,
+        content: body.text.content,
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+        msgtype: 'text',
+        metadata: {
+          req_id: reqId,
+          msgid: msgId,
+          aibotid: body.aibotid,
+          chattype: body.chattype,
+          from: body.from,
+        },
+        raw_payload: frame,
+      };
+      this.onMessage(chatJid, newMessage);
+      console.log('[WeCom] Message emitted to router');
+    }
+  }
+
+  async sendMessage(jid: string, text: string, reqId?: string): Promise<void> {
+    if (!jid.startsWith('wecom:')) {
+      throw new Error(`[WeCom] Invalid JID format: ${jid}`);
+    }
+
+    if (!this.wsClient) {
+      throw new Error('[WeCom] SDK client not initialized');
+    }
+
+    const userId = jid.replace('wecom:', '');
+
+    try {
+      // Try to use pending reply for passive response first
+      const pending = pendingReplies.get(userId);
+      console.log('[WeCom] sendMessage called for:', userId, 'pending:', pending);
+      const replyReqId = reqId || pending?.reqId;
+      console.log('[WeCom] replyReqId:', replyReqId, 'pending.msgId:', pending?.msgId);
+
+      if (replyReqId && pending?.msgId) {
+        // Passive reply: use reply() method with correct frame structure
+        // SDK expects: reply(frame: { headers: { req_id } }, body: ...)
+        console.log('[WeCom] Sending passive reply with req_id:', replyReqId);
+        await this.wsClient.reply({
+          headers: { req_id: replyReqId },
+        }, {
+          msgtype: 'markdown',
+          markdown: { content: text },
+        });
+        console.log('[WeCom] Message sent via SDK reply to', userId);
       } else {
-        console.log('[WeCom] Cannot send heartbeat - WebSocket not open');
+        // Active push: use sendMessage() method
+        console.log('[WeCom] No pending reply, sending active push');
+        await this.wsClient.sendMessage(userId, {
+          msgtype: 'markdown',
+          markdown: { content: text },
+        });
+        console.log('[WeCom] Message sent via SDK sendMessage to', userId);
       }
-    }, this.config.heartbeatIntervalMs);
+    } catch (error: any) {
+      console.error('[WeCom] SDK send failed:', error.message);
+      throw error;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.wsClient) {
+      this.wsClient.disconnect();
+      this.wsClient = null;
+    }
+    this.connected = false;
+    console.log('[WeCom] Disconnected');
+  }
+
+  async syncGroups(force?: boolean): Promise<void> {
+    console.log('[WeCom] syncGroups called (not implemented for individual chats)');
   }
 
   private scheduleReconnect(): void {
@@ -229,434 +276,6 @@ class WeComChannel implements Channel {
         console.error('[WeCom] Reconnect failed:', err);
       });
     }, delay);
-  }
-
-  private async handleMessage(message: any): Promise<void> {
-    console.log('[WeCom] handleMessage called');
-
-    // Handle message callback (aibot_msg_callback)
-    if (message.cmd === 'aibot_msg_callback' && message.body) {
-      const body = message.body;
-      console.log(
-        '[WeCom] Processing message callback, msgtype:',
-        body.msgtype,
-      );
-
-      const timestamp = body.create_time
-        ? new Date(body.create_time * 1000).toISOString()
-        : new Date().toISOString();
-
-      // Determine chat JID
-      const userId = body.from?.userid || 'unknown';
-      const chatJid = `wecom:${userId}`;
-      const senderName = body.from?.name || userId;
-
-      // Emit chat metadata for discovery
-      this.onChatMetadata(chatJid, timestamp, senderName, 'wecom', false);
-      console.log('[WeCom] Chat metadata emitted for:', chatJid);
-
-      // Cache response URL for single chats (expires in 1 hour)
-      if (body.response_url) {
-        responseUrlCache.set(userId, {
-          url: body.response_url,
-          expiresAt: Date.now() + 3600000,
-        });
-        console.log('[WeCom] Cached response_url for:', userId);
-      }
-
-      // Cache req_id for passive reply
-      const reqId = message.headers?.req_id;
-      const msgId = body.msgid;
-      if (reqId && msgId) {
-        pendingReplies.set(userId, { reqId, msgId });
-        console.log(
-          '[WeCom] Cached pending reply for:',
-          userId,
-          'reqId:',
-          reqId,
-        );
-      }
-
-      // Handle text messages
-      if (body.msgtype === 'text' && body.text?.content) {
-        console.log(
-          '[WeCom] Text message content:',
-          body.text.content.substring(0, 100),
-        );
-        const newMessage: NewMessage = {
-          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
-          chat_jid: chatJid,
-          sender: userId,
-          sender_name: senderName,
-          content: body.text.content,
-          timestamp,
-          is_from_me: false,
-          is_bot_message: false,
-          msgtype: 'text',
-          metadata: {
-            req_id: reqId,
-            msgid: msgId,
-            aibotid: body.aibotid,
-            chattype: body.chattype,
-            response_url: body.response_url,
-            response_url_expires: body.response_url
-              ? Date.now() + 3600000
-              : undefined,
-            from: body.from,
-          },
-          raw_payload: message,
-        };
-        this.onMessage(chatJid, newMessage);
-        console.log('[WeCom] Message emitted to router');
-      } else if (body.msgtype === 'image') {
-        console.log('[WeCom] Image message received, url:', body.image?.url);
-        const newMessage: NewMessage = {
-          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
-          chat_jid: chatJid,
-          sender: userId,
-          sender_name: senderName,
-          content: `[图片] ${body.image?.url || ''}`,
-          timestamp,
-          is_from_me: false,
-          is_bot_message: false,
-          msgtype: 'image',
-          metadata: {
-            req_id: reqId,
-            msgid: msgId,
-            aibotid: body.aibotid,
-            chattype: body.chattype,
-            response_url: body.response_url,
-            response_url_expires: body.response_url
-              ? Date.now() + 3600000
-              : undefined,
-            from: body.from,
-            image: body.image,
-          },
-          raw_payload: message,
-        };
-        this.onMessage(chatJid, newMessage);
-      } else if (body.msgtype === 'file') {
-        console.log(
-          '[WeCom] File message received, filename:',
-          body.file?.filename,
-        );
-        const newMessage: NewMessage = {
-          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
-          chat_jid: chatJid,
-          sender: userId,
-          sender_name: senderName,
-          content: `[文件] ${body.file?.filename || 'unknown'}`,
-          timestamp,
-          is_from_me: false,
-          is_bot_message: false,
-          msgtype: 'file',
-          metadata: {
-            req_id: reqId,
-            msgid: msgId,
-            aibotid: body.aibotid,
-            chattype: body.chattype,
-            response_url: body.response_url,
-            response_url_expires: body.response_url
-              ? Date.now() + 3600000
-              : undefined,
-            from: body.from,
-            file: body.file,
-          },
-          raw_payload: message,
-        };
-        this.onMessage(chatJid, newMessage);
-      } else if (body.msgtype === 'voice') {
-        console.log('[WeCom] Voice message received');
-        const newMessage: NewMessage = {
-          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
-          chat_jid: chatJid,
-          sender: userId,
-          sender_name: senderName,
-          content: '[语音]',
-          timestamp,
-          is_from_me: false,
-          is_bot_message: false,
-          msgtype: 'voice',
-          metadata: {
-            req_id: reqId,
-            msgid: msgId,
-            aibotid: body.aibotid,
-            chattype: body.chattype,
-            response_url: body.response_url,
-            response_url_expires: body.response_url
-              ? Date.now() + 3600000
-              : undefined,
-            from: body.from,
-            voice: body.voice,
-          },
-          raw_payload: message,
-        };
-        this.onMessage(chatJid, newMessage);
-      } else if (body.msgtype === 'mixed') {
-        console.log('[WeCom] Mixed message received');
-        const newMessage: NewMessage = {
-          id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId || generateReqId('msg')}`,
-          chat_jid: chatJid,
-          sender: userId,
-          sender_name: senderName,
-          content: '[混合消息]',
-          timestamp,
-          is_from_me: false,
-          is_bot_message: false,
-          msgtype: 'mixed',
-          metadata: {
-            req_id: reqId,
-            msgid: msgId,
-            aibotid: body.aibotid,
-            chattype: body.chattype,
-            response_url: body.response_url,
-            response_url_expires: body.response_url
-              ? Date.now() + 3600000
-              : undefined,
-            from: body.from,
-            mixed: body.mixed,
-          },
-          raw_payload: message,
-        };
-        this.onMessage(chatJid, newMessage);
-      } else {
-        console.log('[WeCom] Unknown message type:', body.msgtype);
-      }
-      return;
-    }
-
-    // Handle event callback (aibot_event_callback)
-    if (message.cmd === 'aibot_event_callback' && message.body) {
-      const body = message.body;
-      console.log(
-        '[WeCom] Processing event callback, event type:',
-        body.event?.EventType || body.event?.eventtype,
-      );
-
-      if (body.event) {
-        const event = body.event;
-        const eventType = event.EventType || event.eventtype;
-
-        // Handle disconnected_event - do NOT reconnect immediately
-        // disconnected_event means "a new connection kicked this one off"
-        // Reconnecting immediately will just get kicked again.
-        // Instead, keep the connection open and wait for messages.
-        if (eventType === 'disconnected_event') {
-          console.log(
-            '[WeCom] Received disconnected_event:',
-            JSON.stringify(event, null, 2),
-          );
-          console.log(
-            '[WeCom] Ignoring disconnected_event — keeping connection open, waiting for messages',
-          );
-          // Do NOT close connection or schedule reconnect
-          // Just log and return, continue listening for messages
-          return;
-        }
-
-        // Skip events without required fields
-        const eventTime = event.create_time || event.CreateTime;
-        const fromUser = event.FromUserName || event.from_user_name;
-        if (!eventTime || !fromUser) {
-          console.log('[WeCom] Event missing required fields, skipping');
-          return;
-        }
-
-        const timestamp = new Date(eventTime * 1000).toISOString();
-        const chatJid = `wecom:${fromUser}`;
-        this.onChatMetadata(chatJid, timestamp, fromUser, 'wecom', false);
-        console.log('[WeCom] Event metadata emitted for:', chatJid);
-
-        // Cache req_id for passive reply (event_callback path for single chat)
-        const reqId = message.headers?.req_id;
-        const msgId = body.msgid;
-        if (reqId && msgId) {
-          pendingReplies.set(fromUser, { reqId, msgId });
-          console.log(
-            '[WeCom] Cached pending reply for event from:',
-            fromUser,
-            'reqId:',
-            reqId,
-          );
-        }
-
-        const eventContent = event.Content || event.content;
-        if (eventType === 'text' && eventContent) {
-          const reqId = message.headers?.req_id;
-          const msgId = body.msgid;
-          const newMessage: NewMessage = {
-            id: `wecom:${fromUser}:${eventTime}:${event.MessageId || generateReqId('msg')}`,
-            chat_jid: chatJid,
-            sender: fromUser,
-            sender_name: fromUser,
-            content: eventContent,
-            timestamp,
-            is_from_me: false,
-            is_bot_message: false,
-            msgtype: 'text',
-            metadata: {
-              req_id: reqId,
-              msgid: msgId,
-              aibotid: body.aibotid,
-              chattype: 'single',
-              response_url: body.response_url,
-              response_url_expires: body.response_url
-                ? Date.now() + 3600000
-                : undefined,
-              event: {
-                EventType: eventType,
-                FromUserName: fromUser,
-                CreateTime: eventTime,
-                MessageId: event.MessageId,
-              },
-            },
-            raw_payload: message,
-          };
-          this.onMessage(chatJid, newMessage);
-          console.log('[WeCom] Event message emitted to router');
-        }
-      }
-      return;
-    }
-
-    console.log(
-      '[WeCom] Unrecognized message format:',
-      JSON.stringify(message),
-    );
-  }
-
-  async sendMessage(jid: string, text: string, reqId?: string): Promise<void> {
-    if (!jid.startsWith('wecom:')) {
-      throw new Error(`[WeCom] Invalid JID format: ${jid}`);
-    }
-
-    const userId = jid.replace('wecom:', '');
-
-    // Try to use cached response_url for single chats
-    const cached = responseUrlCache.get(userId);
-    if (cached && cached.expiresAt > Date.now()) {
-      // Use HTTPS POST to response_url
-      // Enterprise WeChat response_url expects { text: { content: "..." } } format
-      const https = await import('https');
-      const payload = { text: { content: text } };
-
-      return new Promise((resolve, reject) => {
-        const url = new URL(cached.url);
-        const options = {
-          hostname: url.hostname,
-          port: 443,
-          path: url.pathname + url.search,
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        };
-
-        const req = https.request(options, (res) => {
-          let data = '';
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          res.on('end', () => {
-            const response = JSON.parse(data);
-            if (response.errcode === 0) {
-              console.log('[WeCom] Message sent via response_url to', userId);
-              resolve();
-            } else {
-              console.error('[WeCom] Send failed:', response);
-              reject(new Error(response.errmsg || 'Send failed'));
-            }
-          });
-        });
-
-        req.on('error', (e) => {
-          console.error('[WeCom] Send request error:', e);
-          reject(e);
-        });
-
-        req.write(JSON.stringify(payload));
-        req.end();
-      });
-    }
-
-    // Fallback: use WebSocket send
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error(
-        '[WeCom] WebSocket not connected and no response_url cached',
-      );
-    }
-
-    // Get pending reply info if no reqId provided
-    let replyReqId = reqId;
-    if (!replyReqId) {
-      const pending = pendingReplies.get(userId);
-      if (pending) {
-        replyReqId = pending.reqId;
-        console.log('[WeCom] Using pending reply reqId for:', userId);
-      }
-    }
-
-    // Use aibot_respond_msg if we have a reqId (passive reply), otherwise aibot_send_msg (active push)
-    const cmd = replyReqId ? 'aibot_respond_msg' : 'aibot_send_msg';
-    const frameReqId = replyReqId || generateReqId('send');
-
-    // Note: aibot_send_msg does NOT support text type, only markdown/template_card/media
-    // So we use markdown type for text content when active pushing
-    const payload: any = {
-      cmd,
-      headers: { req_id: frameReqId },
-      body: {
-        msgtype: 'markdown',
-        markdown: { content: text },
-      },
-    };
-
-    if (replyReqId && cmd === 'aibot_respond_msg') {
-      // Passive reply also needs chatid
-      payload.body.chatid = userId;
-    } else if (cmd === 'aibot_send_msg') {
-      // Active push requires chatid
-      payload.body.chatid = userId;
-    }
-
-    return new Promise((resolve, reject) => {
-      if (!this.ws) {
-        reject(new Error('[WeCom] WebSocket is null'));
-        return;
-      }
-      this.ws.send(JSON.stringify(payload), (error: Error | undefined) => {
-        if (error) {
-          console.error('[WeCom] Send message error:', error);
-          reject(error);
-        } else {
-          console.log('[WeCom] Message sent via', cmd, 'to', userId);
-          resolve();
-        }
-      });
-    });
-  }
-
-  async disconnect(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.heartbeatTimer) {
-        clearInterval(this.heartbeatTimer);
-        this.heartbeatTimer = null;
-      }
-      if (this.ws) {
-        this.ws.close();
-        this.ws = null;
-      }
-      this.connected = false;
-      console.log('[WeCom] Disconnected');
-      resolve();
-    });
-  }
-
-  async syncGroups(force?: boolean): Promise<void> {
-    // WeCom individual chats don't need sync
-    console.log(
-      '[WeCom] syncGroups called (not implemented for individual chats)',
-    );
   }
 }
 

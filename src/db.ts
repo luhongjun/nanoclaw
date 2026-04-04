@@ -637,7 +637,7 @@ export function setSession(
   groupFolder?: string,
 ): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (chat_jid, session_id, group_folder, updated_at) VALUES (?, ?, ?, datetime("now"))',
+    "INSERT OR REPLACE INTO sessions (chat_jid, session_id, group_folder, updated_at) VALUES (?, ?, ?, datetime('now'))",
   ).run(chatJid, sessionId, groupFolder || null);
 }
 

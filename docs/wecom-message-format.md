@@ -1,6 +1,8 @@
 # 企业微信 AI Bot 消息格式规范
 
 > 本文档记录企业微信 AI Bot 通过 WebSocket 推送的消息协议格式，用于消息解析和回复功能的开发与维护。
+> 
+> **最后更新**: 2026-04-04 — 已迁移至官方 SDK `@wecom/aibot-node-sdk`
 
 ## 底层逻辑
 
@@ -13,6 +15,68 @@
 | `ping` | 心跳响应 | 服务端发送心跳探测 |
 
 ---
+
+## SDK 集成（当前实现方式）
+
+NanoClaw 使用官方 SDK `@wecom/aibot-node-sdk` 进行连接，而非原生 WebSocket。
+
+### 初始化
+
+```typescript
+import AiBot from '@wecom/aibot-node-sdk';
+
+const wsClient = new AiBot.WSClient({
+  botId: process.env.WECOM_BOT_ID,
+  secret: process.env.WECOM_SECRET,
+  wsUrl: 'wss://openws.work.weixin.qq.com',
+});
+```
+
+### 事件监听
+
+```typescript
+// 认证成功
+wsClient.on('authenticated', () => {
+  console.log('SDK authenticated!');
+});
+
+// 消息接收
+wsClient.on('message.text', (frame: WsFrame) => {
+  handleSDKMessage(frame);
+});
+
+// 断开连接（正常行为，不要重连）
+wsClient.on('disconnected', (reason: string) => {
+  console.log('Disconnected:', reason);
+  // disconnected_event 表示"新连接已接管"，不要重连
+});
+```
+
+### 发送消息
+
+```typescript
+// 被动回复（使用缓存的 req_id）
+await wsClient.reply({
+  headers: { req_id: replyReqId },
+}, {
+  msgtype: 'markdown',
+  markdown: { content: '回复内容' },
+});
+
+// 主动推送
+await wsClient.sendMessage(userId, {
+  msgtype: 'markdown',
+  markdown: { content: '推送内容' },
+});
+```
+
+---
+
+## 原生 WebSocket 协议（底层原理）
+
+---
+
+> 以下为原生 WebSocket 协议细节，供原理理解使用。实际开发请使用上方 SDK 方式。
 
 ## 消息结构总览
 
@@ -196,6 +260,35 @@
 
 ## 回复消息协议
 
+### SDK 方式（当前使用）
+
+**被动回复**（推荐，使用缓存的 `req_id`）：
+
+```typescript
+await wsClient.reply({
+  headers: { req_id: replyReqId },
+}, {
+  msgtype: 'markdown',
+  markdown: { content: '回复内容' },
+});
+```
+
+**主动推送**（`response_url` 过期后）：
+
+```typescript
+await wsClient.sendMessage(userId, {
+  msgtype: 'markdown',
+  markdown: { content: '推送内容' },
+});
+```
+
+**关键点**：
+- `reply()` 第一个参数是 `{ headers: { req_id } }`，不是 flat 对象
+- WeCom 不支持 `text` 类型回复，必须使用 `markdown`
+- `req_id` 来自收到消息时的 `frame.headers.req_id`
+
+### 原生 WebSocket 方式（原理参考）
+
 ### 方式一：通过 response_url 回复（推荐）
 
 **适用场景**：收到 `aibot_msg_callback` 后 1 小时内
@@ -329,13 +422,32 @@ Content-Type: application/json
 |---------|------|----------|
 | 0 | 成功 | - |
 | 40001 | 凭证无效 | 检查 bot_id 和 secret 配置 |
-| 40014 | 参数错误 | 检查请求格式和必填字段 |
+| 40008 | 无效的消息类型 | 使用 `markdown` 而非 `text` |
+| 40014 | 参数错误 | 检查请求格式，`reply()` 需要 `{ headers: { req_id } }` |
 | 45009 | 频率超限 | 降低发送频率，增加间隔 |
 | 50001 | 服务器内部错误 | 稍后重试 |
+| 846605 | 无效的 req_id | 检查 `reply()` 参数结构是否正确 |
 
 ---
 
 ## 实现要点
+
+### SDK 使用要点
+
+**连接管理**：
+- `disconnected_event` 是正常行为，表示"新连接已接管"
+- 不要在 `disconnected` 事件中重连——第一个连接就是成功的连接
+- SDK 内部处理心跳，默认 30 秒间隔
+
+**消息回复**：
+- 缓存收到消息的 `req_id` 和 `msgId`
+- 被动回复使用 `reply({ headers: { req_id } }, body)` 结构
+- 必须使用 `markdown` 类型，不支持 `text`
+
+**错误处理**：
+- 45009 频率超限：等待 30 秒后重试
+- 846605 无效 req_id：检查 `reply()` 参数结构
+- 40008 无效类型：确保使用 `markdown` 而非 `text`
 
 ### 消息去重
 使用 `msgid` 字段进行消息去重，防止重复处理。
@@ -356,7 +468,7 @@ Content-Type: application/json
 
 ## 相关文件
 
-- `src/channels/wecom.ts` — 企业微信通道实现
+- `src/channels/wecom.ts` — 企业微信通道实现（使用官方 SDK）
 - `src/config.ts` — 配置项（`WECOM_BOT_ID`、`WECOM_SECRET`）
 
 ---
@@ -365,4 +477,5 @@ Content-Type: application/json
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-04-04 | 1.1 | 迁移至官方 SDK `@wecom/aibot-node-sdk`，更新 reply() 参数结构 |
 | 2026-04-03 | 1.0 | 初始版本，记录消息协议格式 |
