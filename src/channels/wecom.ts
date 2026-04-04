@@ -147,6 +147,11 @@ class WeComChannel implements Channel {
         this.handleSDKMessage(frame);
       });
 
+      this.wsClient.on('message.mixed', (frame: WsFrame) => {
+        console.log('[WeCom] SDK received mixed message');
+        this.handleSDKMessage(frame);
+      });
+
       this.wsClient.on('event.enter_chat', (frame: WsFrame) => {
         console.log('[WeCom] SDK received enter_chat event');
         this.handleSDKMessage(frame);
@@ -199,6 +204,8 @@ class WeComChannel implements Channel {
           aibotid: body.aibotid,
           chattype: body.chattype,
           from: body.from,
+          // Include quote if present (for reply context)
+          ...(body.quote && { quote: body.quote }),
         },
         raw_payload: frame,
       };
