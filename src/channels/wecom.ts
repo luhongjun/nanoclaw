@@ -1,18 +1,40 @@
 import { registerChannel } from './registry.js';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { Channel, NewMessage } from '../types.js';
-import { WECOM_BOT_ID, WECOM_SECRET } from '../config.js';
+import { WECOM_BOT_ID, WECOM_SECRET, DATA_DIR } from '../config.js';
 import AiBot, { MessageType, EventType } from '@wecom/aibot-node-sdk';
 import type { WsFrame, BaseMessage } from '@wecom/aibot-node-sdk';
 
 // Cache pending reply requests - map userId to { reqId, msgId } for passive reply
 const pendingReplies = new Map<string, { reqId: string; msgId: string }>();
 
+// Image cache directory - stores downloaded images for agent access
+const IMAGE_CACHE_DIR =
+  process.env.NANOCLAW_IMAGE_DIR || path.join(DATA_DIR, 'images');
+
+// Ensure image directory exists
+function ensureImageDir(): void {
+  if (!fs.existsSync(IMAGE_CACHE_DIR)) {
+    fs.mkdirSync(IMAGE_CACHE_DIR, { recursive: true });
+  }
+}
+
 /**
  * Generate req_id for frames
  */
 function generateReqId(prefix = 'req'): string {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+}
+
+/**
+ * Generate unique filename for downloaded image
+ */
+function generateImageFilename(msgId: string, ext: string = 'jpg'): string {
+  const hash = crypto.createHash('md5').update(msgId).digest('hex').slice(0, 8);
+  return `wecom_${Date.now()}_${hash}.${ext}`;
 }
 
 export interface WeComConfig {
@@ -162,10 +184,13 @@ class WeComChannel implements Channel {
         this.handleSDKMessage(frame);
       });
 
-      this.wsClient.on(`event.${EventType.TemplateCardEvent}`, (frame: WsFrame) => {
-        console.log('[WeCom] SDK received template_card_event');
-        this.handleSDKMessage(frame);
-      });
+      this.wsClient.on(
+        `event.${EventType.TemplateCardEvent}`,
+        (frame: WsFrame) => {
+          console.log('[WeCom] SDK received template_card_event');
+          this.handleSDKMessage(frame);
+        },
+      );
 
       this.wsClient.on(`event.${EventType.FeedbackEvent}`, (frame: WsFrame) => {
         console.log('[WeCom] SDK received feedback_event');
@@ -236,15 +261,33 @@ class WeComChannel implements Channel {
       this.onMessage(chatJid, buildMessage('text', body.text.content));
       console.log('[WeCom] Text message emitted to router');
     }
-    // Handle image messages
+    // Handle image messages - download and decrypt for agent access
     else if (body.msgtype === MessageType.Image && body.image?.url) {
-      this.onMessage(
-        chatJid,
-        buildMessage('image', '', {
-          image: { url: body.image.url, aeskey: body.image.aeskey },
-        }),
-      );
-      console.log('[WeCom] Image message emitted to router');
+      this.handleImageMessage(body.image.url, body.image.aeskey, msgId)
+        .then((imageInfo) => {
+          this.onMessage(
+            chatJid,
+            buildMessage('image', imageInfo.containerPath || imageInfo.url, {
+              image: {
+                url: body.image!.url,
+                aeskey: body.image!.aeskey,
+                localPath: imageInfo.localPath,
+                containerPath: imageInfo.containerPath,
+              },
+            }),
+          );
+          console.log('[WeCom] Image message emitted to router');
+        })
+        .catch((err) => {
+          console.error('[WeCom] Failed to download image:', err);
+          // Fallback: emit message with URL only
+          this.onMessage(
+            chatJid,
+            buildMessage('image', `[图片](${body.image!.url})`, {
+              image: { url: body.image!.url, aeskey: body.image!.aeskey },
+            }),
+          );
+        });
     }
     // Handle file messages
     else if (body.msgtype === MessageType.File && body.file) {
@@ -270,10 +313,7 @@ class WeComChannel implements Channel {
     }
     // Handle video messages
     else if (body.msgtype === MessageType.Video && body.video?.url) {
-      this.onMessage(
-        chatJid,
-        buildMessage('video', '', { video: body.video }),
-      );
+      this.onMessage(chatJid, buildMessage('video', '', { video: body.video }));
       console.log('[WeCom] Video message emitted to router');
     }
     // Handle event messages
@@ -366,6 +406,38 @@ class WeComChannel implements Channel {
     console.log(
       '[WeCom] syncGroups called (not implemented for individual chats)',
     );
+  }
+
+  /**
+   * Download and decrypt image from WeCom.
+   * Returns local path (for host) and container path (for agent).
+   */
+  private async handleImageMessage(
+    url: string,
+    aesKey: string | undefined,
+    msgId: string,
+  ): Promise<{ localPath: string; containerPath: string; url: string }> {
+    if (!this.wsClient) {
+      throw new Error('WSClient not initialized');
+    }
+
+    ensureImageDir();
+
+    // Download and decrypt image using SDK
+    const { buffer } = await this.wsClient.downloadFile(url, aesKey);
+
+    // Generate unique filename
+    const filename = generateImageFilename(msgId || generateReqId('img'));
+    const localPath = path.join(IMAGE_CACHE_DIR, filename);
+
+    // Save to local disk
+    fs.writeFileSync(localPath, buffer);
+    console.log('[WeCom] Image saved to:', localPath);
+
+    // Container path is mounted at /workspace/images
+    const containerPath = `/workspace/images/${filename}`;
+
+    return { localPath, containerPath, url };
   }
 
   private scheduleReconnect(): void {

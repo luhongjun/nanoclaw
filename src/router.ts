@@ -19,8 +19,20 @@ export function formatMessages(
 
     // Format content based on message type
     let formattedContent = m.content;
-    if (m.msgtype === 'image' && m.metadata?.image?.url) {
-      formattedContent = `[图片](${m.metadata.image.url})`;
+    if (m.msgtype === 'image' && m.metadata?.image) {
+      const imageMeta = m.metadata.image as {
+        url?: string;
+        containerPath?: string;
+        localPath?: string;
+      };
+      // Prefer container path for agent access (downloaded image)
+      if (imageMeta.containerPath) {
+        formattedContent = `[图片] 文件路径: ${imageMeta.containerPath}`;
+      } else if (imageMeta.url) {
+        formattedContent = `[图片](${imageMeta.url})`;
+      } else {
+        formattedContent = '[图片]';
+      }
     } else if (m.msgtype === 'file' && m.metadata?.file) {
       const filename = m.metadata.file.filename || 'unknown';
       const fileurl = m.metadata.file.fileurl || '';

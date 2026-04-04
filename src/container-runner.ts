@@ -217,6 +217,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Image cache directory - mount downloaded images for agent access
+  // Images are downloaded from WeCom and saved here for vision capabilities
+  const imageCacheDir = path.join(DATA_DIR, 'images');
+  if (fs.existsSync(imageCacheDir)) {
+    mounts.push({
+      hostPath: imageCacheDir,
+      containerPath: '/workspace/images',
+      readonly: true, // Read-only to prevent agent from modifying cached images
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
