@@ -32,10 +32,7 @@ function checkSingleInstance(): void {
         process.exit(1);
       } catch {
         // Old process is dead, remove stale pidfile
-        logger.warn(
-          { stalePid: oldPid },
-          'Found stale pidfile, removing',
-        );
+        logger.warn({ stalePid: oldPid }, 'Found stale pidfile, removing');
         try {
           fs.unlinkSync(PIDFILE);
         } catch {
@@ -51,7 +48,10 @@ function writePidFile(): void {
     fs.writeFileSync(PIDFILE, process.pid.toString(), 'utf-8');
     logger.info({ pid: process.pid, pidfile: PIDFILE }, 'PID file written');
   } catch (err) {
-    logger.warn({ err }, 'Failed to write pidfile, single-instance protection disabled');
+    logger.warn(
+      { err },
+      'Failed to write pidfile, single-instance protection disabled',
+    );
   }
 }
 
@@ -73,11 +73,20 @@ function cleanupPidFile(): void {
 
 // Install cleanup handlers before any work begins
 process.on('exit', cleanupPidFile);
-process.on('SIGINT', () => { cleanupPidFile(); process.exit(); });
-process.on('SIGTERM', () => { cleanupPidFile(); process.exit(); });
+process.on('SIGINT', () => {
+  cleanupPidFile();
+  process.exit();
+});
+process.on('SIGTERM', () => {
+  cleanupPidFile();
+  process.exit();
+});
 // Windows specific: handle Ctrl+Break
 if (process.platform === 'win32') {
-  process.on('SIGBREAK', () => { cleanupPidFile(); process.exit(); });
+  process.on('SIGBREAK', () => {
+    cleanupPidFile();
+    process.exit();
+  });
 }
 
 // Global error handlers to catch uncaught exceptions

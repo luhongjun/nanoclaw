@@ -376,15 +376,20 @@ export async function runContainerAgent(
     // Wait for container to be fully removed (Docker --rm can have slight delay)
     for (let i = 0; i < 10; i++) {
       try {
-        const check = execSync(`${CONTAINER_RUNTIME_BIN} ps -q --filter name=^${containerName}$`, {
-          stdio: 'pipe',
-          timeout: 2000,
-        }).toString().trim();
+        const check = execSync(
+          `${CONTAINER_RUNTIME_BIN} ps -q --filter name=^${containerName}$`,
+          {
+            stdio: 'pipe',
+            timeout: 2000,
+          },
+        )
+          .toString()
+          .trim();
         if (check === '') break;
       } catch {
         break;
       }
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
   } catch {
     // Container doesn't exist or already removed - this is fine
