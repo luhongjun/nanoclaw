@@ -13,6 +13,7 @@ import {
   containerExists,
   removeContainer,
   stopContainer,
+  listNanoclawContainers,
 } from './container-runtime.js';
 import {
   CONTAINER_POOL_ENABLED,
@@ -133,10 +134,9 @@ class ContainerPool {
 
     // Use setImmediate to run cleanup in next tick (non-blocking)
     setImmediate(() => {
-      this.cleanupContainer(containerName)
-        .finally(() => {
-          this.cleanupLocks.delete(containerName);
-        });
+      this.cleanupContainer(containerName).finally(() => {
+        this.cleanupLocks.delete(containerName);
+      });
     });
   }
 
@@ -217,7 +217,7 @@ class ContainerPool {
   /** Clean up IPC files older than 5 minutes. */
   private cleanupStaleIpcFiles(chatJid: string): void {
     const entry = this.containers.get(chatJid);
-    if (!entry) return;
+    if (!entry || !entry.groupFolder) return;
 
     const ipcInputDir = resolveGroupIpcPath(entry.groupFolder);
     const inputDir = path.join(ipcInputDir, 'input');
@@ -267,7 +267,10 @@ class ContainerPool {
         logger.info({ chatJid, containerName }, 'Evicted container from pool');
       })
       .catch((err) => {
-        logger.warn({ chatJid, containerName, err }, 'Failed to evict container');
+        logger.warn(
+          { chatJid, containerName, err },
+          'Failed to evict container',
+        );
       });
   }
 
@@ -309,8 +312,7 @@ class ContainerPool {
       Array.from(this.containers.values()).map((c) => c.name),
     );
 
-    // Get all nanoclaw containers (running only - listNanoclawContainers uses docker ps without -a)
-    const { listNanoclawContainers } = require('./container-runtime.js');
+    // Get all nanoclaw containers (running only)
     const allContainers = listNanoclawContainers();
 
     for (const name of allContainers) {
