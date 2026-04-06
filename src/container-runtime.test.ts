@@ -112,7 +112,7 @@ describe('cleanupOrphans', () => {
     expect(mockExecSync).toHaveBeenNthCalledWith(
       3,
       `${CONTAINER_RUNTIME_BIN} rm -f nanoclaw-group1-111`,
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 10000 },
     );
     expect(mockExecSync).toHaveBeenNthCalledWith(
       4,
@@ -122,7 +122,7 @@ describe('cleanupOrphans', () => {
     expect(mockExecSync).toHaveBeenNthCalledWith(
       5,
       `${CONTAINER_RUNTIME_BIN} rm -f nanoclaw-group2-222`,
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 10000 },
     );
     expect(logger.info).toHaveBeenCalledWith(
       { count: 2, names: ['nanoclaw-group1-111', 'nanoclaw-group2-222'] },
@@ -158,8 +158,6 @@ describe('cleanupOrphans', () => {
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('already stopped');
     });
-    // First remove succeeds
-    mockExecSync.mockReturnValueOnce('');
     // Second stop succeeds
     mockExecSync.mockReturnValueOnce('');
     // Second remove succeeds
@@ -167,7 +165,8 @@ describe('cleanupOrphans', () => {
 
     cleanupOrphans(); // should not throw
 
-    expect(mockExecSync).toHaveBeenCalledTimes(5);
+    // ps + 1 stop(fail) + 1 stop + 1 remove = 4 calls
+    expect(mockExecSync).toHaveBeenCalledTimes(4);
     expect(logger.info).toHaveBeenCalledWith(
       { count: 2, names: ['nanoclaw-a-1', 'nanoclaw-b-2'] },
       'Cleaned up orphaned containers',
