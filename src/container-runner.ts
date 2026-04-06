@@ -245,10 +245,10 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
-  usePool: boolean = false,
+  shouldPersist: boolean = false,
 ): Promise<string[]> {
   // When pool is enabled, don't use --rm so containers persist for reuse
-  const baseArgs = usePool
+  const baseArgs = shouldPersist
     ? ['run', '-i', '--name', containerName]
     : ['run', '-i', '--rm', '--name', containerName];
   const args: string[] = baseArgs;
@@ -355,22 +355,58 @@ export async function runContainerAgent(
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
 
-  // Try to acquire existing container from pool (for tracking purposes)
+  // Try to acquire existing container from pool
   const acquired = containerPool.acquire(group, input.chatJid, containerName);
 
-  // Note: Container reuse via IPC is not yet implemented.
-  // For now, the pool tracks containers and cleans up idle ones,
-  // but each message still spawns a fresh container.
-  // TODO: Implement true container reuse by keeping stdin open and
-  // appending messages via IPC.
+  // When pool is enabled and container is already running, send message via IPC instead of spawning new container
+  if (CONTAINER_POOL_ENABLED && !acquired.isNew) {
+    logger.info(
+      { group: group.name, containerName, chatJid: input.chatJid },
+      'Reusing running container, sending message via IPC',
+    );
 
+    // Send message to existing container via IPC
+    const ipcInputDir = resolveGroupIpcPath(group.folder);
+    const ipcInputFileDir = path.join(ipcInputDir, 'input');
+    fs.mkdirSync(ipcInputFileDir, { recursive: true });
+
+    // Check for pending IPC messages - if any exist, return error
+    const pendingFiles = fs.readdirSync(ipcInputFileDir).filter(f => f.endsWith('.json'));
+    if (pendingFiles.length > 0) {
+      logger.warn({ group: group.name, pendingCount: pendingFiles.length }, 'IPC messages pending');
+      return {
+        status: 'error',
+        result: null,
+        error: 'AI 正在分析中，请稍后再发送消息',
+      };
+    }
+
+    const ipcMessage = {
+      type: 'message',
+      text: input.prompt,
+    };
+    const timestamp = Date.now().toString(36).padStart(6, '0');
+    const random = Math.random().toString(36).substring(2, 8);
+    const ipcFileName = `msg-${timestamp}-${random}.json`;
+    const ipcFilePath = path.join(ipcInputFileDir, ipcFileName);
+    fs.writeFileSync(ipcFilePath, JSON.stringify(ipcMessage));
+
+    // Return immediately - container is still running and will process the IPC
+    return {
+      status: 'success',
+      result: null,
+      newSessionId: undefined,
+    };
+  }
+
+  // Need to spawn new container (either pool disabled, or no existing container)
   // Create new container
-  const usePool = CONTAINER_POOL_ENABLED;
+  const shouldPersist = CONTAINER_POOL_ENABLED;
   const containerArgs = await buildContainerArgs(
     mounts,
     containerName,
     agentIdentifier,
-    usePool,
+    shouldPersist,
   );
 
   logger.debug(
@@ -382,7 +418,7 @@ export async function runContainerAgent(
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
       containerArgs: containerArgs.join(' '),
-      usePool,
+      shouldPersist,
     },
     'Container mount configuration',
   );
@@ -393,13 +429,13 @@ export async function runContainerAgent(
       containerName,
       mountCount: mounts.length,
       isMain: input.isMain,
-      usePool,
+      shouldPersist,
     },
     'Spawning container agent',
   );
 
   // Pre-cleanup only if not using pool (pool handles cleanup)
-  if (!usePool) {
+  if (!shouldPersist) {
     try {
       const { execSync } = require('child_process');
       execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerName}`, {
@@ -704,7 +740,7 @@ export async function runContainerAgent(
       if (onOutput) {
         outputChain.then(() => {
           // When using pool, mark container as idle instead of closing
-          if (usePool) {
+          if (shouldPersist) {
             containerPool.release(input.chatJid);
             logger.info(
               { group: group.name, duration, newSessionId, containerName },
