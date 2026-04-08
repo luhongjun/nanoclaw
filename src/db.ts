@@ -70,9 +70,13 @@ function createSchema(database: Database.Database): void {
       value TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
-      group_folder TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL
+      chat_jid TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      group_folder TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (group_folder) REFERENCES registered_groups(folder)
     );
+    CREATE INDEX IF NOT EXISTS idx_sessions_group ON sessions(group_folder);
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -147,13 +151,11 @@ function createSchema(database: Database.Database): void {
     /* columns already exist */
   }
 
-  // Add reply context columns if they don't exist (migration for existing DBs)
+  // Add metadata, msgtype, raw_payload columns to messages table (migration for full payload storage)
   try {
-    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`);
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN reply_to_message_content TEXT`,
-    );
-    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN msgtype TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN raw_payload TEXT`);
   } catch {
     /* columns already exist */
   }
@@ -221,20 +223,6 @@ export function storeChatMetadata(
   }
 }
 
-/**
- * Update chat name without changing timestamp for existing chats.
- * New chats get the current time as their initial timestamp.
- * Used during group metadata sync.
- */
-export function updateChatName(chatJid: string, name: string): void {
-  db.prepare(
-    `
-    INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
-    ON CONFLICT(jid) DO UPDATE SET name = excluded.name
-  `,
-  ).run(chatJid, name, new Date().toISOString());
-}
-
 export interface ChatInfo {
   jid: string;
   name: string;
@@ -259,33 +247,12 @@ export function getAllChats(): ChatInfo[] {
 }
 
 /**
- * Get timestamp of last group metadata sync.
- */
-export function getLastGroupSync(): string | null {
-  // Store sync time in a special chat entry
-  const row = db
-    .prepare(`SELECT last_message_time FROM chats WHERE jid = '__group_sync__'`)
-    .get() as { last_message_time: string } | undefined;
-  return row?.last_message_time || null;
-}
-
-/**
- * Record that group metadata was synced.
- */
-export function setLastGroupSync(): void {
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO chats (jid, name, last_message_time) VALUES ('__group_sync__', '__group_sync__', ?)`,
-  ).run(now);
-}
-
-/**
  * Store a message with full content.
  * Only call this for registered groups where message history is needed.
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, reply_to_message_id, reply_to_message_content, reply_to_sender_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, msgtype, metadata, raw_payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -295,36 +262,9 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
-    msg.reply_to_message_id ?? null,
-    msg.reply_to_message_content ?? null,
-    msg.reply_to_sender_name ?? null,
-  );
-}
-
-/**
- * Store a message directly.
- */
-export function storeMessageDirect(msg: {
-  id: string;
-  chat_jid: string;
-  sender: string;
-  sender_name: string;
-  content: string;
-  timestamp: string;
-  is_from_me: boolean;
-  is_bot_message?: boolean;
-}): void {
-  db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-    msg.is_bot_message ? 1 : 0,
+    msg.msgtype || null,
+    msg.metadata ? JSON.stringify(msg.metadata) : null,
+    msg.raw_payload ? JSON.stringify(msg.raw_payload) : null,
   );
 }
 
@@ -339,15 +279,15 @@ export function getNewMessages(
   const placeholders = jids.map(() => '?').join(',');
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // Allow non-text messages (image/file/voice/mixed/video) even if content is empty.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
-             reply_to_message_id, reply_to_message_content, reply_to_sender_name
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, msgtype, metadata, raw_payload
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
+        AND (content != '' AND content IS NOT NULL OR msgtype IN ('image', 'file', 'voice', 'mixed', 'video', 'event'))
       ORDER BY timestamp DESC
       LIMIT ?
     ) ORDER BY timestamp
@@ -355,14 +295,36 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as Array<{
+    id: string;
+    chat_jid: string;
+    sender: string;
+    sender_name: string;
+    content: string;
+    timestamp: string;
+    is_from_me: number;
+    is_bot_message: number;
+    msgtype: string | null;
+    metadata: string | null;
+    raw_payload: string | null;
+  }>;
+
+  // Parse JSON fields
+  const messages: NewMessage[] = rows.map((row) => ({
+    ...row,
+    is_from_me: row.is_from_me === 1,
+    is_bot_message: row.is_bot_message === 1,
+    msgtype: row.msgtype || undefined,
+    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    raw_payload: row.raw_payload ? JSON.parse(row.raw_payload) : undefined,
+  }));
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
     if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
   }
 
-  return { messages: rows, newTimestamp };
+  return { messages, newTimestamp };
 }
 
 export function getMessagesSince(
@@ -373,22 +335,44 @@ export function getMessagesSince(
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // Allow non-text messages (image/file/voice/mixed/video) even if content is empty.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
-             reply_to_message_id, reply_to_message_content, reply_to_sender_name
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, msgtype, metadata, raw_payload
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
-        AND content != '' AND content IS NOT NULL
+        AND (content != '' AND content IS NOT NULL OR msgtype IN ('image', 'file', 'voice', 'mixed', 'video', 'event'))
       ORDER BY timestamp DESC
       LIMIT ?
     ) ORDER BY timestamp
   `;
-  return db
+  const rows = db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as Array<{
+    id: string;
+    chat_jid: string;
+    sender: string;
+    sender_name: string;
+    content: string;
+    timestamp: string;
+    is_from_me: number;
+    is_bot_message: number;
+    msgtype: string | null;
+    metadata: string | null;
+    raw_payload: string | null;
+  }>;
+
+  // Parse JSON fields
+  return rows.map((row) => ({
+    ...row,
+    is_from_me: row.is_from_me === 1,
+    is_bot_message: row.is_bot_message === 1,
+    msgtype: row.msgtype || undefined,
+    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    raw_payload: row.raw_payload ? JSON.parse(row.raw_payload) : undefined,
+  }));
 }
 
 export function getLastBotMessageTimestamp(
@@ -431,14 +415,6 @@ export function getTaskById(id: string): ScheduledTask | undefined {
   return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as
     | ScheduledTask
     | undefined;
-}
-
-export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
-  return db
-    .prepare(
-      'SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC',
-    )
-    .all(groupFolder) as ScheduledTask[];
 }
 
 export function getAllTasks(): ScheduledTask[] {
@@ -564,32 +540,51 @@ export function setRouterState(key: string, value: string): void {
 
 // --- Session accessors ---
 
-export function getSession(groupFolder: string): string | undefined {
-  const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
-    .get(groupFolder) as { session_id: string } | undefined;
-  return row?.session_id;
-}
-
-export function setSession(groupFolder: string, sessionId: string): void {
+/**
+ * Set session ID for a chat_jid.
+ * @param chatJid - The chat session identifier
+ * @param sessionId - The Agent session ID
+ * @param groupFolder - Optional: associated group folder (for scheduled tasks)
+ */
+export function setSession(
+  chatJid: string,
+  sessionId: string,
+  groupFolder?: string,
+): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
-  ).run(groupFolder, sessionId);
+    "INSERT OR REPLACE INTO sessions (chat_jid, session_id, group_folder, updated_at) VALUES (?, ?, ?, datetime('now'))",
+  ).run(chatJid, sessionId, groupFolder || null);
 }
 
-export function deleteSession(groupFolder: string): void {
-  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
-}
-
+/**
+ * Get all sessions as a record mapping chat_jid to session_id.
+ * @returns Record<chat_jid, session_id>
+ */
 export function getAllSessions(): Record<string, string> {
   const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions')
-    .all() as Array<{ group_folder: string; session_id: string }>;
+    .prepare('SELECT chat_jid, session_id FROM sessions')
+    .all() as Array<{ chat_jid: string; session_id: string }>;
   const result: Record<string, string> = {};
   for (const row of rows) {
-    result[row.group_folder] = row.session_id;
+    result[row.chat_jid] = row.session_id;
   }
   return result;
+}
+
+/**
+ * Get session ID by group_folder (for scheduled tasks).
+ * This returns a shared session for all chats in the same group.
+ * @deprecated Use getSession(chatJid) for per-chat sessions.
+ */
+export function getSessionByGroupFolder(
+  groupFolder: string,
+): string | undefined {
+  const row = db
+    .prepare(
+      'SELECT session_id FROM sessions WHERE group_folder = ? ORDER BY updated_at DESC LIMIT 1',
+    )
+    .get(groupFolder) as { session_id: string } | undefined;
+  return row?.session_id;
 }
 
 // --- Registered group accessors ---

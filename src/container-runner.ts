@@ -16,7 +16,11 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import {
+  resolveGroupFolderPath,
+  resolveGroupIpcPath,
+  jidToFolderName,
+} from './group-folder.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
@@ -27,6 +31,7 @@ import {
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { readEnvFile } from './env.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -249,21 +254,58 @@ async function buildContainerArgs(
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Memory limit: 2GB (agent needs ~1.5GB for Node.js + Chromium + SDK)
+  // Exit code 137 = SIGKILL from OOM killer - this was the root cause of container deaths
+  args.push('--memory', '2g', '--memory-swap', '2g');
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Mount .env file so agent-runner can read ANTHROPIC_* config values
+  const envFile = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envFile)) {
+    args.push('-v', `${envFile}:/app/.env:ro`);
+  }
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
+  let onecliApplied = false;
+  try {
+    onecliApplied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false, // Nanoclaw already handles host gateway
+      agent: agentIdentifier,
+    });
+  } catch (err) {
+    logger.warn({ containerName, err: String(err) }, 'OneCLI SDK call failed');
+  }
+
+  // Always inject credentials from .env as fallback
+  // OneCLI may be running but CLI tool might not be installed, or user may use non-Anthropic API
+  const envConfig = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_MODEL',
+  ]);
+  if (envConfig.ANTHROPIC_API_KEY) {
+    args.push('-e', `ANTHROPIC_API_KEY=${envConfig.ANTHROPIC_API_KEY}`);
+    args.push(
+      '-e',
+      `ANTHROPIC_AUTH_TOKEN=${envConfig.ANTHROPIC_AUTH_TOKEN || envConfig.ANTHROPIC_API_KEY}`,
+    );
+    if (envConfig.ANTHROPIC_BASE_URL) {
+      args.push('-e', `ANTHROPIC_BASE_URL=${envConfig.ANTHROPIC_BASE_URL}`);
+    }
+    if (envConfig.ANTHROPIC_MODEL) {
+      args.push('-e', `ANTHROPIC_MODEL=${envConfig.ANTHROPIC_MODEL}`);
+    }
+    logger.info({ containerName }, 'Injected credentials from .env');
+  } else if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
     logger.warn(
       { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+      'No credentials available - OneCLI gateway not reachable AND no .env credentials found',
     );
   }
 
@@ -305,22 +347,29 @@ export async function runContainerAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain);
-  const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+  // Container name based on chat JID (sender identity), not timestamp.
+  // Same sender reuses the same container name, enabling container reuse.
+  // Format: nanoclaw-{channel}_{senderId}, e.g. nanoclaw-wecom_zhangsan
+  const containerName = `nanoclaw-${jidToFolderName(input.chatJid)}`;
   // Main group uses the default OneCLI agent; others use their own agent.
   const agentIdentifier = input.isMain
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
+
+  // Use unique container name each time to avoid Docker name conflicts.
+  // --rm handles cleanup automatically; no pre-cleanup needed.
+  const uniqueContainerName = `${containerName}-${Date.now()}`;
+
   const containerArgs = await buildContainerArgs(
     mounts,
-    containerName,
+    uniqueContainerName,
     agentIdentifier,
   );
 
   logger.debug(
     {
       group: group.name,
-      containerName,
+      containerName: uniqueContainerName,
       mounts: mounts.map(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
@@ -333,7 +382,7 @@ export async function runContainerAgent(
   logger.info(
     {
       group: group.name,
-      containerName,
+      containerName: uniqueContainerName,
       mountCount: mounts.length,
       isMain: input.isMain,
     },
@@ -348,14 +397,14 @@ export async function runContainerAgent(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    onProcess(container, containerName);
+    onProcess(container, uniqueContainerName);
 
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
+    container.stdin.write(JSON.stringify({ type: 'init', ...input }));
     container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
@@ -447,14 +496,14 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
-        { group: group.name, containerName },
+        { group: group.name, containerName: uniqueContainerName },
         'Container timeout, stopping gracefully',
       );
       try {
-        stopContainer(containerName);
+        stopContainer(uniqueContainerName);
       } catch (err) {
         logger.warn(
-          { group: group.name, containerName, err },
+          { group: group.name, containerName: uniqueContainerName, err },
           'Graceful stop failed, force killing',
         );
         container.kill('SIGKILL');
@@ -482,7 +531,7 @@ export async function runContainerAgent(
             `=== Container Run Log (TIMEOUT) ===`,
             `Timestamp: ${new Date().toISOString()}`,
             `Group: ${group.name}`,
-            `Container: ${containerName}`,
+            `Container: ${uniqueContainerName}`,
             `Duration: ${duration}ms`,
             `Exit Code: ${code}`,
             `Had Streaming Output: ${hadStreamingOutput}`,
@@ -494,7 +543,12 @@ export async function runContainerAgent(
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName, duration, code },
+            {
+              group: group.name,
+              containerName: uniqueContainerName,
+              duration,
+              code,
+            },
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
@@ -508,7 +562,12 @@ export async function runContainerAgent(
         }
 
         logger.error(
-          { group: group.name, containerName, duration, code },
+          {
+            group: group.name,
+            containerName: uniqueContainerName,
+            duration,
+            code,
+          },
           'Container timed out with no output',
         );
 
@@ -677,7 +736,7 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       logger.error(
-        { group: group.name, containerName, error: err },
+        { group: group.name, containerName: uniqueContainerName, error: err },
         'Container spawn error',
       );
       resolve({

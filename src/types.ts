@@ -51,10 +51,9 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
-  thread_id?: string;
-  reply_to_message_id?: string;
-  reply_to_message_content?: string;
-  reply_to_sender_name?: string;
+  msgtype?: string; // Message type: text/image/file/voice/mixed/video/event
+  metadata?: Record<string, any>; // Channel-specific metadata (req_id, response_url, etc.)
+  raw_payload?: any; // Original raw message payload
 }
 
 export interface ScheduledTask {

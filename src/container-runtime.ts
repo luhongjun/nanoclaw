@@ -85,15 +85,18 @@ export function cleanupOrphans(): void {
     const orphans = output.trim().split('\n').filter(Boolean);
     for (const name of orphans) {
       try {
-        stopContainer(name);
+        execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${name}`, {
+          stdio: 'pipe',
+          timeout: 10000,
+        });
       } catch {
-        /* already stopped */
+        /* already removed */
       }
     }
     if (orphans.length > 0) {
       logger.info(
         { count: orphans.length, names: orphans },
-        'Stopped orphaned containers',
+        'Removed orphaned containers',
       );
     }
   } catch (err) {
