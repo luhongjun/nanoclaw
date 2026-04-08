@@ -7,7 +7,6 @@ import { isValidTimezone } from './timezone.js';
 // Read config values from .env (falls back to process.env).
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
-  'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
   'WECOM_BOT_ID',
@@ -16,9 +15,6 @@ const envConfig = readEnvFile([
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
-export const ASSISTANT_HAS_OWN_NUMBER =
-  (process.env.ASSISTANT_HAS_OWN_NUMBER ||
-    envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -62,35 +58,13 @@ export const MAX_MESSAGES_PER_PROMPT = Math.max(
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
 );
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '60000', 10); // 1min default — how long to keep container alive after last result
-export const MAX_CONCURRENT_CONTAINERS = Math.max(
-  1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
-);
-
-// Container pool configuration
-export const CONTAINER_POOL_ENABLED =
-  process.env.CONTAINER_POOL_ENABLED !== 'false'; // enabled by default
-
-export const CONTAINER_POOL_MAX_IDLE_MS = parseInt(
-  process.env.CONTAINER_POOL_MAX_IDLE_MS || '300000',
-  10,
-); // 5min default — how long to keep idle containers before cleanup
-export const CONTAINER_POOL_CLEANUP_INTERVAL_MS = parseInt(
-  process.env.CONTAINER_POOL_CLEANUP_INTERVAL_MS || '60000',
-  10,
-); // 1min default — how often to check for idle containers
-
-export const CONTAINER_AUTO_SHUTDOWN_MS = parseInt(
-  process.env.CONTAINER_AUTO_SHUTDOWN_MS || '60000',
-  10,
-); // 1min default — auto-shutdown after no activity
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '60000', 10); // 1min default
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function buildTriggerPattern(trigger: string): RegExp {
+function buildTriggerPattern(trigger: string): RegExp {
   return new RegExp(`^${escapeRegex(trigger.trim())}\\b`, 'i');
 }
 

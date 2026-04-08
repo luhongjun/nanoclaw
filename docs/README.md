@@ -1,91 +1,149 @@
 # NanoClaw 文档
 
-官方文档请访问 **[docs.nanoclaw.dev](https://docs.nanoclaw.dev)**。
+本目录包含 NanoClaw 项目的详细技术文档。
 
-本目录中的文件是原始设计文档和开发者参考。最新和最全的信息请访问官方文档站点。
+## 文档索���
 
-## 本地文档目录
+### 架构文档
 
 | 文档 | 说明 |
 |------|------|
-| [session-architecture.md](session-architecture.md) | 会话架构设计：私聊按人、群聊按群、消息完整存储 |
-| [wecom-message-format.md](wecom-message-format.md) | 企业微信消息格式规范：WebSocket 协议详解 |
-| [WECOM-SDK-INTEGRATION.md](WECOM-SDK-INTEGRATION.md) | 企业微信 SDK 集成指南：踩坑经验和最佳实践 |
-| [SPEC.md](SPEC.md) | 技术规格说明书 |
-| [SECURITY.md](SECURITY.md) | 安全模型说明 |
-| [REQUIREMENTS.md](REQUIREMENTS.md) | 需求文档 |
-| [skills-as-branches.md](skills-as-branches.md) | Skills 系统设计 |
-| [DEBUG_CHECKLIST.md](DEBUG_CHECKLIST.md) | 调试检查清单 |
-| [docker-sandboxes.md](docker-sandboxes.md) | Docker 沙箱设计 |
-| [APPLE-CONTAINER-NETWORKING.md](APPLE-CONTAINER-NETWORKING.md) | Apple 容器网络配置 |
+| [**PROJECT-STRUCTURE.md**](PROJECT-STRUCTURE.md) | 项目目录结构详解，包含所有目录的职责说明和关键设计模式 |
+| [**CONTAINER-ARCHITECTURE.md**](CONTAINER-ARCHITECTURE.md) | Agent 容器运行原理，包含通信机制、池化管理、生命周期 |
+| [**DATABASE-SCHEMA.md**](DATABASE-SCHEMA.md) | 数据库表设计，��含所有表结构、索引、关系图和 API |
 
-## 文档索引
+### 设计文档
 
-### 架构设计
+| 文档 | 说明 |
+|------|------|
+| [**REQUIREMENTS.md**](REQUIREMENTS.md) | 架构决策记录 (ADR)，项目的技术选型原因 |
+| [**SPEC.md**](SPEC.md) | 功能规格说明 |
+| [**SECURITY.md**](SECURITY.md) | 安全模型说明 |
 
-- [session-architecture.md](session-architecture.md) — 会话架构设计文档
-  - Chat-Centric 会话模型
-  - 私聊按人、群聊按群
-  - metadata 和 raw_payload 存储设计
+### 部署文档
 
-- [SPEC.md](SPEC.md) — 技术规格说明书
-  - 系统整体架构
-  - 模块设计
-  - 数据流设计
+| 文档 | 说明 |
+|------|------|
+| [**DEPLOYMENT.md**](DEPLOYMENT.md) | 部署指南 |
+| [**docker-sandboxes.md**](docker-sandboxes.md) | Docker 沙箱隔离方案 |
 
-- [docker-sandboxes.md](docker-sandboxes.md) — Docker 沙箱设计
-  - 容器隔离机制
-  - 文件系统挂载
-  - 网络配置
+### 企业微信集成
 
-### 集成文档
+| 文档 | 说明 |
+|------|------|
+| [**WECOM-SDK-INTEGRATION.md**](WECOM-SDK-INTEGRATION.md) | 企业微信 SDK 集成指南，包含消息接收流程、回复机制、完整流程图 |
 
-- [wecom-message-format.md](wecom-message-format.md) — 企业微信消息格式
-  - WebSocket 协议
-  - 消息类型详解
-  - 回复机制
+### 其他
 
-- [WECOM-SDK-INTEGRATION.md](WECOM-SDK-INTEGRATION.md) — 企业微信 SDK 集成指南
-  - 快速开始
-  - 踩坑经验（reply() 参数结构、disconnected_event 处理）
-  - 完整实现示例
-  - 错误码速查表
+| 文档 | 说明 |
+|------|------|
+| [**session-architecture.md**](session-architecture.md) | 会话架构设计 |
+| [**skills-as-branches.md**](skills-as-branches.md) | 技能分支机制说明 |
+| [**SDK_DEEP_DIVE.md**](SDK_DEEP_DIVE.md) | Claude Agent SDK 深入解析 |
+| [**BRANCH-FORK-MAINTENANCE.md**](BRANCH-FORK-MAINTENANCE.md) | 分支和 Fork 维护指南 |
+| [**APPLE-CONTAINER-NETWORKING.md**](APPLE-CONTAINER-NETWORKING.md) | Apple Container 网络配置 |
+| [**DEBUG_CHECKLIST.md**](DEBUG_CHECKLIST.md) | 调试检查清单 |
 
-- [skills-as-branches.md](skills-as-branches.md) — Skills 系统
-  - Skill 设计原理
-  - 开发规范
-  - 发布流程
+## 快速导航
 
-### 安全与调试
+### 我想了解...
 
-- [SECURITY.md](SECURITY.md) — 安全模型
-  - 容器安全
-  - 凭证管理
-  - 权限控制
+- **项目整体结构** → [PROJECT-STRUCTURE.md](PROJECT-STRUCTURE.md)
+- **容器如何运行** → [CONTAINER-ARCHITECTURE.md](CONTAINER-ARCHITECTURE.md)
+- **数据库设计** → [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md)
+- **为什么这样设计** → [REQUIREMENTS.md](REQUIREMENTS.md)
+- **安全机制** → [SECURITY.md](SECURITY.md)
+- **如何部署** → [DEPLOYMENT.md](DEPLOYMENT.md)
+- **企业微信集成** → [WECOM-SDK-INTEGRATION.md](WECOM-SDK-INTEGRATION.md)
+- **如何调试** → [DEBUG_CHECKLIST.md](DEBUG_CHECKLIST.md)
 
-- [DEBUG_CHECKLIST.md](DEBUG_CHECKLIST.md) — 调试检查清单
-  - 常见问题排查
-  - 日志分析
-  - 故障恢复
+## 核心概念
 
-### 运维文档
+### 架构概览
 
-- [APPLE-CONTAINER-NETWORKING.md](APPLE-CONTAINER-NETWORKING.md) — Apple 容器网络
-  - macOS 网络配置
-  - 端口映射
-  - 防火墙设置
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    NanoClaw 主进程                           │
+│                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ 消息循环     │  │ 容器池管理   │  │ 任务调度器          │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│         │                │                    │              │
+│         ▼                ▼                    ▼              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ 渠道注册中心 │  │ 容器运行时   │  │ SQLite 数据库       │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Docker 容器 (隔离)                        │
+│                                                             │
+│  Claude Agent SDK + MCP Tools + 群组文件系统                 │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
 
-- [REQUIREMENTS.md](REQUIREMENTS.md) — 需求文档
-  - 功能需求
-  - 非功能需求
-  - 验收标准
+### 关键设计模式
 
-## 文档更新记录
-
-| 日期 | 文档 | 更新内容 |
+| 模式 | 说明 | 相关文件 |
 |------|------|----------|
-| 2026-04-04 | WECOM-SDK-INTEGRATION.md | 新增：SDK 集成踩坑经验文档 |
-| 2026-04-04 | wecom-message-format.md | 更新：SDK 集成方式、reply() 参数结构 |
-| 2026-04-04 | session-architecture.md | 更新：添加 SDK 回复链路 |
-| 2026-04-03 | session-architecture.md | 新增：会话架构设计文档 |
-| 2026-04-03 | wecom-message-format.md | 新增：企业微信消息格式规范 |
+| 渠道自注册 | 启动时自动发现和注册渠道 | `src/channels/registry.ts` |
+| 群组隔离 | 每个群组独立文件系统和记忆 | `groups/{name}/` |
+| 技能分支 | 功能通过分支合并安装 | `.claude/skills/` |
+| IPC 通信 | 主进程与容器通过文件通信 | `data/ipc/{name}/` |
+
+### 数据流
+
+```
+消息渠道 → 主进程 → 容器 → Agent SDK → 响应 → 主进程 → 消息渠道
+              │                          │
+              ▼                          ▼
+         SQLite 数据库              群组记忆文件
+```
+
+## 开发指南
+
+### 本地开发
+
+```bash
+npm run dev          # 热重载开发模式
+npm run build        # 编译 TypeScript
+./container/build.sh # 重建容器镜像
+```
+
+### 目录结构
+
+```
+nanoclaw/
+├── src/              # 主进程源码
+├── container/        # 容器构建文件
+├── groups/           # 群组数据
+├── data/             # 运行时数据
+├── docs/             # 文档
+└── .claude/skills/   # 功能技能
+```
+
+详细说明见 [PROJECT-STRUCTURE.md](PROJECT-STRUCTURE.md)
+
+### 核心文件
+
+| 文件 | 职责 |
+|------|------|
+| `src/index.ts` | 主入口：状态管理、消息循环 |
+| `src/container-runner.ts` | 容器启动和 IPC（定时任务） |
+| `src/router.ts` | 消息路由 |
+| `src/channels/registry.ts` | 渠道注册 |
+| `src/db.ts` | 数据库操作 |
+
+## 外部资源
+
+- [官方文档](https://docs.nanoclaw.dev)
+- [API 参考](https://docs.nanoclaw.dev/api)
+- [更新日志](https://docs.nanoclaw.dev/changelog)
+- [Discord 社区](https://discord.gg/VDdww8qS42)
+
+---
+
+*最后更新: 2026-04-06 (重构: 简化容器管理)*

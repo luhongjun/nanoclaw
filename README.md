@@ -143,7 +143,6 @@ Key files:
 - `src/channels/registry.ts` - Channel registry (self-registration at startup)
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with global concurrency limit
 - `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)

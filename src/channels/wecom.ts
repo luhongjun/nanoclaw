@@ -15,13 +15,11 @@ function generateReqId(prefix = 'req'): string {
   return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 }
 
-export interface WeComConfig {
+interface WeComConfig {
   botId: string;
   secret: string;
   wsUrl?: string;
   heartbeatIntervalMs?: number;
-  reconnectInitialDelayMs?: number;
-  reconnectMaxDelayMs?: number;
 }
 
 class WeComChannel implements Channel {
@@ -37,7 +35,6 @@ class WeComChannel implements Channel {
   ) => void;
   private wsClient: AiBot.WSClient | null = null;
   private connected = false;
-  private reconnectAttempts = 0;
 
   constructor(
     onMessage: (chatJid: string, msg: NewMessage) => void,
@@ -67,12 +64,6 @@ class WeComChannel implements Channel {
       heartbeatIntervalMs: parseInt(
         process.env.WECOM_HEARTBEAT_INTERVAL_MS || '30000',
       ),
-      reconnectInitialDelayMs: parseInt(
-        process.env.WECOM_RECONNECT_INITIAL_DELAY_MS || '1000',
-      ),
-      reconnectMaxDelayMs: parseInt(
-        process.env.WECOM_RECONNECT_MAX_DELAY_MS || '30000',
-      ),
     };
     this.onMessage = onMessage;
     this.onChatMetadata = onChatMetadata;
@@ -99,7 +90,6 @@ class WeComChannel implements Channel {
       this.wsClient.on('authenticated', () => {
         console.log('[WeCom] SDK authenticated!');
         this.connected = true;
-        this.reconnectAttempts = 0;
         resolve();
       });
 
@@ -507,22 +497,6 @@ class WeComChannel implements Channel {
     console.log(
       '[WeCom] syncGroups called (not implemented for individual chats)',
     );
-  }
-
-  private scheduleReconnect(): void {
-    const delay = Math.min(
-      (this.config.reconnectInitialDelayMs || 1000) *
-        Math.pow(2, this.reconnectAttempts),
-      this.config.reconnectMaxDelayMs || 30000,
-    );
-    console.log(
-      `[WeCom] Reconnecting in ${delay}ms (attempt ${++this.reconnectAttempts})`,
-    );
-    setTimeout(() => {
-      this.connect().catch((err) => {
-        console.error('[WeCom] Reconnect failed:', err);
-      });
-    }, delay);
   }
 }
 

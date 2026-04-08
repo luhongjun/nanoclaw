@@ -1,367 +1,397 @@
-# 企业微信 SDK 集成文档
+# 企业微信 SDK 集成
 
-> 记录使用 `@wecom/aibot-node-sdk` 集成企业微信 AI Bot 的关键发现、踩坑经验和最佳实践。
+本文档详细说明 NanoClaw 与企业微信的集成方式，包括 SDK 配置、消息接收流程和回复机制。
 
-## 快速开始
+## 概述
 
-### 安装
+NanoClaw 使用企业微信官方 AI Bot SDK (`@wecom/aibot-node-sdk`) 通过 WebSocket 连接实现实时消息通信。
+
+```
+企业微信服务器 (WebSocket) → WeComChannel → 主进程 (消息存储) → 轮询循环 → 容器执行 → 回复发送
+```
+
+## 配置
+
+### 环境变量
 
 ```bash
-npm install @wecom/aibot-node-sdk
+# .env 文件
+WECOM_BOT_ID=your_bot_id        # 机器人 ID
+WECOM_SECRET=your_secret_key    # 机器人密钥
+WECOM_WS_URL=wss://openws.work.weixin.qq.com  # WebSocket 地址 (可选)
 ```
 
-### 初始化
+### 凭证获取
 
-```typescript
-import AiBot from '@wecom/aibot-node-sdk';
-import type { WsFrame } from '@wecom/aibot-node-sdk';
-
-const wsClient = new AiBot.WSClient({
-  botId: process.env.WECOM_BOT_ID,
-  secret: process.env.WECOM_SECRET,
-  wsUrl: process.env.WECOM_WS_URL || 'wss://openws.work.weixin.qq.com',
-});
-```
-
-### 事件监听
-
-```typescript
-// 认证成功
-wsClient.on('authenticated', () => {
-  console.log('[WeCom] SDK authenticated!');
-});
-
-// 文本消息
-wsClient.on('message.text', (frame: WsFrame) => {
-  handleSDKMessage(frame);
-});
-
-// 图片消息
-wsClient.on('message.image', (frame: WsFrame) => {
-  handleSDKMessage(frame);
-});
-
-// 断开连接
-wsClient.on('disconnected', (reason: string) => {
-  console.log('[WeCom] SDK disconnected:', reason);
-  // 重要：不要重连！disconnected_event 表示"新连接已接管"
-});
-
-// 连接 SDK
-wsClient.connect();
-```
-
-### 发送消息
-
-```typescript
-// 被动回复（使用缓存的 req_id）
-await wsClient.reply({
-  headers: { req_id: replyReqId },
-}, {
-  msgtype: 'markdown',
-  markdown: { content: '回复内容' },
-});
-
-// 主动推送
-await wsClient.sendMessage(userId, {
-  msgtype: 'markdown',
-  markdown: { content: '推送内容' },
-});
-```
+1. 登录企业微信管理后台
+2. 进入「应用管理」→「自建应用」
+3. 创建或选择机器人应用
+4. 获取 `AgentId` 和 `Secret`
 
 ---
 
-## 关键踩坑经验
+## 消息接收流程
 
-### 1. reply() 参数结构
+### 1. WebSocket 连接建立
 
-**错误写法**（会导致 846605 错误）：
+**文件**: `src/channels/wecom.ts`
+
 ```typescript
-// ❌ 错误：flat 结构
-await wsClient.reply({
-  req_id: replyReqId,
-  msg_id: pending.msgId,
-}, {
-  msgtype: 'markdown',
-  markdown: { content: '回复内容' },
+import * as AiBot from '@wecom/aibot-node-sdk';
+
+// 初始化 WebSocket 客户端
+this.wsClient = new AiBot.WSClient({
+  botId: this.config.botId,      // WECOM_BOT_ID
+  secret: this.config.secret,    // WECOM_SECRET
+  wsUrl: this.config.wsUrl,      // wss://openws.work.weixin.qq.com
 });
 ```
 
-**正确写法**：
-```typescript
-// ✅ 正确：嵌套在 headers 中
-await wsClient.reply({
-  headers: { req_id: replyReqId },
-}, {
-  msgtype: 'markdown',
-  markdown: { content: '回复内容' },
-});
+### 2. 消息类型监听
+
+SDK 监听多种消息类型和事件：
+
+| 事件类型 | 说明 | 触发时机 |
+|----------|------|----------|
+| `message.text` | 文本消息 | 用户发送文本 |
+| `message.image` | 图片消息 | 用户发送图片 |
+| `message.file` | 文件消息 | 用户发送文件 |
+| `message.voice` | 语音消息 | 用户发送语音 |
+| `message.mixed` | 混合消息 | 图文混合等 |
+| `message.video` | 视频消息 | 用户发送视频 |
+| `event.enter_chat` | 进入会话 | 用户打开聊天窗口 |
+| `event.template_card_event` | 模板卡片事件 | 卡片交互 |
+| `event.feedback_event` | 反馈事件 | 用户反馈 |
+
+### 3. 消息接收与转换
+
+当收到 WebSocket 消息帧时 (`handleSDKMessage` 方法)：
+
 ```
-
-**原因**：SDK 期望第一个参数是 `WsFrameHeaders` 类型，结构为 `{ headers: { req_id: string } }`。
-
----
-
-### 2. disconnected_event 是正常行为
-
-**错误理解**：
-> disconnected_event 表示连接失败，需要重连
-
-**正确理解**：
-> disconnected_event 表示"新连接已接管，旧连接关闭"——这是**正常启动流程**
-
-**场景**：
-1. 应用启动，SDK 建立第一个连接
-2. 认证成功，服务器发送 `disconnected_event` 给旧连接（如果有）
-3. 第一个连接就是成功的连接，**不需要重连**
-
-**错误代码**（会导致无限重连循环）：
-```typescript
-// ❌ 错误：disconnected 事件中重连
-wsClient.on('disconnected', (reason: string) => {
-  this.connected = false;
-  this.scheduleReconnect(); // 无限循环！
-});
-```
-
-**正确代码**：
-```typescript
-// ✅ 正确：只记录状态，不重连
-wsClient.on('disconnected', (reason: string) => {
-  console.log('[WeCom] SDK disconnected:', reason);
-  this.connected = false;
-  // 不要重连！如果是正常 startup，第一个连接已经成功了
-  if (reason.includes('New connection established')) {
-    console.log('[WeCom] 这是正常的——第一个连接成功了，服务器在清理旧连接');
-  }
-});
-```
-
----
-
-### 3. 消息类型必须使用 markdown
-
-**错误**（会导致 40008 错误）：
-```typescript
-// ❌ 错误：WeCom 不支持 text 类型回复
-await wsClient.reply(frame, {
+WsFrame (原始帧)
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 1. 解析 frame.body                                          │
+│ 2. 提取 userId → chatJid = "wecom:{userId}"                 │
+│ 3. 提取 senderName, timestamp, msgId                        │
+│ 4. 缓存 pendingReplies (用于被动回复)                        │
+│ 5. 构建 NewMessage 对象                                      │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+NewMessage {
+  id: "wecom:{userId}:{timestamp}:{msgid}",
+  chat_jid: "wecom:{userId}",
+  sender: userId,
+  sender_name: "显示名称",
+  content: "消息内容",
+  timestamp: "2026-04-06T10:00:00.000Z",
+  is_from_me: false,
+  is_bot_message: false,
   msgtype: 'text',
-  text: { content: '回复内容' },
-});
-```
-
-**正确**：
-```typescript
-// ✅ 正确：使用 markdown
-await wsClient.reply(frame, {
-  msgtype: 'markdown',
-  markdown: { content: '回复内容' },
-});
-```
-
----
-
-### 4. 频率限制（45009 错误）
-
-**现象**：
-```
-errcode: 45009, errmsg: api freq out of limit
-```
-
-**原因**：短时间内多次认证失败导致重连循环，触发频率限制。
-
-**解决方案**：
-1. 等待 30-60 秒让频率限制重置
-2. 修复重连逻辑，避免无限重连
-3. 重启服务
-
----
-
-## 完整实现示例
-
-```typescript
-import { registerChannel } from './registry.js';
-import crypto from 'crypto';
-import { Channel, NewMessage } from '../types.js';
-import { WECOM_BOT_ID, WECOM_SECRET } from '../config.js';
-import AiBot from '@wecom/aibot-node-sdk';
-import type { WsFrame } from '@wecom/aibot-node-sdk';
-
-// 缓存 pending reply 请求
-const pendingReplies = new Map<string, { reqId: string; msgId: string }>();
-
-function generateReqId(prefix = 'req'): string {
-  return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+  metadata: { req_id, msgid, aibotid, chattype, from, ... },
+  raw_payload: frame
 }
+```
 
-class WeComChannel implements Channel {
-  name = 'wecom';
-  private wsClient: AiBot.WSClient | null = null;
-  private connected = false;
+### 4. 回调触发
 
-  constructor(
-    private onMessage: (chatJid: string, msg: NewMessage) => void,
-    private onChatMetadata: (chatJid: string, timestamp: string) => void,
-  ) {}
+```typescript
+// 元数据回调 - 存储会话信息
+this.onChatMetadata(chatJid, timestamp, senderName, 'wecom', false);
 
-  async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.wsClient = new AiBot.WSClient({
-        botId: WECOM_BOT_ID,
-        secret: WECOM_SECRET,
-        wsUrl: 'wss://openws.work.weixin.qq.com',
-      });
+// 消息回调 - 触发主进程处理
+this.onMessage(chatJid, newMessage);
+```
 
-      this.wsClient.on('authenticated', () => {
-        console.log('[WeCom] SDK authenticated!');
-        this.connected = true;
-        resolve();
-      });
+### 5. 主进程消息处理
 
-      this.wsClient.on('disconnected', (reason: string) => {
-        console.log('[WeCom] SDK disconnected:', reason);
-        this.connected = false;
-        // 不要重连！
-      });
+**文件**: `src/index.ts` - `channelOpts.onMessage`
 
-      this.wsClient.on('error', (error: Error) => {
-        console.error('[WeCom] SDK error:', error);
-        reject(error);
-      });
+```typescript
+onMessage: (chatJid: string, msg: NewMessage) => {
+  // 1. 拦截远程控制命令
+  if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
+    handleRemoteControl(trimmed, chatJid, msg);
+    return;
+  }
 
-      this.wsClient.on('message.text', (frame: WsFrame) => {
-        this.handleSDKMessage(frame);
-      });
+  // 2. 发送者白名单过滤 (drop 模式)
+  if (shouldDropMessage(chatJid, cfg) && !isSenderAllowed(chatJid, msg.sender, cfg)) {
+    return;  // 丢弃消息
+  }
 
-      this.wsClient.connect();
+  // 3. 存储到 SQLite 数据库
+  storeMessage(msg);
+}
+```
+
+### 6. 轮询消息循环
+
+**文件**: `src/index.ts` - `startMessageLoop()`
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   startMessageLoop()                         │
+│                                                              │
+│   while (true) {                                             │
+│     1. 获取已注册群组 JIDs                                    │
+│     2. getNewMessages(jids, lastTimestamp)                   │
+│     3. 更新 lastTimestamp 游标                               │
+│     4. 按群组分组消息                                        │
+│     5. 对每个群组:                                           │
+│        a. 检查是否已注册                                     │
+│        b. 格式化消息                                         │
+│        c. 发送到容器或入队                                   │
+│     6. await sleep(POLL_INTERVAL) // 2秒                    │
+��   }                                                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 回复发送机制
+
+### 被动回复 vs 主动推送
+
+企业微信支持两种回复模式：
+
+| 模式 | 方法 | 速度 | 适用场景 |
+|------|------|------|----------|
+| **被动回复** | `reply()` | 快 | 在收到消息后立即响应 |
+| **主动推送** | `sendMessage()` | 稍慢 | 主动发起消息或延迟回复 |
+
+### 实现代码
+
+**文件**: `src/channels/wecom.ts` - `sendMessage()`
+
+```typescript
+async sendMessage(chatJid: string, text: string): Promise<void> {
+  const userId = chatJid.replace('wecom:', '');
+
+  if (pendingReplies.has(userId)) {
+    // 被动回复 - 使用 reply() 方法
+    // 在同一个 WebSocket 连接上响应，速度更快
+    const { reqId } = pendingReplies.get(userId);
+    await this.wsClient.reply(
+      { headers: { req_id: reqId } },
+      { markdown: { content: text } }
+    );
+    pendingReplies.delete(userId);
+  } else {
+    // 主动推送 - 使用 sendMessage() 方法
+    await this.wsClient.sendMessage(userId, {
+      markdown: { content: text }
     });
   }
+}
+```
 
-  private handleSDKMessage(frame: WsFrame): void {
-    const body = frame.body;
-    if (!body) return;
+### 消息格式
 
-    const userId = body.from?.userid || 'unknown';
-    const chatJid = `wecom:${userId}`;
-    const timestamp = body.create_time
-      ? new Date(body.create_time * 1000).toISOString()
-      : new Date().toISOString();
+支持多种消息格式：
 
-    // 缓存 pending reply
-    const reqId = frame.headers?.req_id;
-    const msgId = body.msgid;
-    if (reqId && msgId) {
-      pendingReplies.set(userId, { reqId, msgId });
-    }
+```typescript
+// Markdown 格式
+{ markdown: { content: '**粗体** `代码`' } }
 
-    // 发送消息到 router
-    if (body.msgtype === 'text' && body.text?.content) {
-      const newMessage: NewMessage = {
-        id: `wecom:${userId}:${body.create_time || Date.now()}:${msgId}`,
-        chat_jid: chatJid,
-        sender: userId,
-        sender_name: body.from?.name || userId,
-        content: body.text.content,
-        timestamp,
-        is_from_me: false,
-        is_bot_message: false,
-        msgtype: 'text',
-        metadata: {
-          req_id: reqId,
-          msgid: msgId,
-          aibotid: body.aibotid,
-          chattype: body.chattype,
-          from: body.from,
-        },
-        raw_payload: frame,
-      };
-      this.onMessage(chatJid, newMessage);
-    }
-  }
+// 文本格式
+{ text: { content: '纯文本' } }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
-    if (!this.wsClient) {
-      throw new Error('[WeCom] SDK client not initialized');
-    }
-
-    const userId = jid.replace('wecom:', '');
-    const pending = pendingReplies.get(userId);
-
-    if (pending?.reqId) {
-      // 被动回复
-      await this.wsClient.reply({
-        headers: { req_id: pending.reqId },
-      }, {
-        msgtype: 'markdown',
-        markdown: { content: text },
-      });
-      console.log('[WeCom] Message sent via SDK reply to', userId);
-    } else {
-      // 主动推送
-      await this.wsClient.sendMessage(userId, {
-        msgtype: 'markdown',
-        markdown: { content: text },
-      });
-      console.log('[WeCom] Message sent via SDK sendMessage to', userId);
-    }
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.wsClient) {
-      this.wsClient.disconnect();
-      this.wsClient = null;
-    }
-    this.connected = false;
+// 模板卡片
+{
+  template_card: {
+    card_type: 'text_notice',
+    main_title: { title: '标题', desc: '描述' },
+    // ...
   }
 }
-
-registerChannel('wecom', (opts) => {
-  if (!WECOM_BOT_ID || !WECOM_SECRET) {
-    return null;
-  }
-  return new WeComChannel(opts.onMessage, opts.onChatMetadata);
-});
 ```
 
 ---
 
-## 环境变量
+## 完整流程图
 
-| 变量名 | 说明 | 默认值 |
-|--------|------|--------|
-| `WECOM_BOT_ID` | 企业微信 Bot ID | 必填 |
-| `WECOM_SECRET` | 企业微信 Secret | 必填 |
-| `WECOM_WS_URL` | WebSocket 服务器地址 | `wss://openws.work.weixin.qq.com` |
-| `WECOM_HEARTBEAT_INTERVAL_MS` | 心跳间隔（毫秒） | `30000` |
-| `WECOM_RECONNECT_INITIAL_DELAY_MS` | 重连初始延迟（已废弃） | - |
-| `WECOM_RECONNECT_MAX_DELAY_MS` | 重连最大延迟（已废弃） | - |
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     企业微信服务器                                   │
+│               wss://openws.work.weixin.qq.com                       │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ WebSocket 消息帧
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  WeComChannel (src/channels/wecom.ts)                               │
+│                                                                     │
+│  AiBot.WSClient.on('message.text', handleSDKMessage)               │
+│    │                                                                │
+│    ├─▶ 解析 WsFrame → 提取 userId, content, timestamp              │
+│    ├─▶ chatJid = "wecom:{userId}"                                  │
+│    ├─▶ 构建 NewMessage 对象                                         │
+│    ├─▶ onChatMetadata() → 存储会话元数据                            │
+│    └─▶ onMessage(chatJid, newMessage)                              │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ onMessage 回调
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  主进程 (src/index.ts)                                              │
+│                                                                     │
+│  channelOpts.onMessage(chatJid, msg)                               │
+│    │                                                                │
+│    ├─▶ 远程控制命令拦截                                             │
+│    ├─▶ 白名单过滤 (可选)                                            │
+│    └─▶ storeMessage(msg) → SQLite 数据库                           │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ 消息已存储
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  轮询循环 (startMessageLoop)                                        │
+│                                                                     │
+│  每 2 秒:                                                           │
+│    │                                                                │
+│    ├─▶ getNewMessages(jids, lastTimestamp)                         │
+│    ├─▶ formatMessages() → XML 格式                                  │
+│    └─▶ 发送到容器队列                                                │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ 消息入队
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  processGroupMessages (src/index.ts)                                 │
+│                                                                     │
+│    ├─▶ 获取待处理消息                                                │
+│    ├─▶ 格式化消息为 XML                                              │
+│    └─▶ runContainerAgent() → container-runner.ts                   │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ 执行 Agent
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  容器执行 (src/container-runner.ts)                                 │
+│                                                                     │
+│    ├─▶ 启动 Docker 容器                                             │
+│    ├─▶ Claude Agent SDK 处理消息                                    │
+│    └─▶ 流式输出 via onOutput 回调                                   │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ 输出回调
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  回复发送 (WeComChannel.sendMessage)                                │
+│                                                                     │
+│    ├─▶ 有 pending reply → reply() 被动回复                          │
+│    └─▶ 无 pending reply → sendMessage() 主动推送                    │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     用户收到回复                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 错误码速查表
+## 数据结构
 
-| errcode | 说明 | 解决方案 |
-|---------|------|----------|
-| 0 | 成功 | - |
-| 40001 | 凭证无效 | 检查 `bot_id` 和 `secret` |
-| 40008 | 无效的消息类型 | 使用 `markdown` 而非 `text` |
-| 40014 | 参数错误 | 检查 `reply()` 参数结构 |
-| 45009 | 频率超限 | 等待 30-60 秒，修复重连逻辑 |
-| 50001 | 服务器内部错误 | 稍后重试 |
-| 846605 | 无效的 req_id | 检查 `reply()` 第一个参数是 `{ headers: { req_id } }` |
+### NewMessage
+
+```typescript
+interface NewMessage {
+  id: string;              // "wecom:{userId}:{timestamp}:{msgid}"
+  chat_jid: string;        // "wecom:{userId}"
+  sender: string;          // 用户ID
+  sender_name: string;     // 显示名称
+  content: string;         // 消息内容
+  timestamp: string;       // ISO 时间戳
+  is_from_me?: boolean;    // 是否自己发送
+  is_bot_message?: boolean;// 是否机器人消息
+  msgtype?: string;        // text/image/file/voice/mixed/video/event
+  metadata?: Record<string, any>;  // 渠道特定元数据
+  raw_payload?: any;       // 原始消息帧
+}
+```
+
+### 消息元数据 (metadata)
+
+```typescript
+interface WeComMetadata {
+  req_id: string;          // 请求 ID (用于被动回复)
+  msgid: string;           // 消息 ID
+  aibotid: string;         // AI Bot ID
+  chattype: 'single' | 'group';  // 聊天类型
+  from: {
+    userid: string;        // 发送者用户 ID
+    name: string;          // 发送者名称
+  };
+  // ... 其他字段
+}
+```
 
 ---
 
-## 相关文件
+## 关键文件
 
-- `src/channels/wecom.ts` — 完整实现代码
-- `docs/wecom-message-format.md` — 消息协议格式详解
-- `docs/session-architecture.md` — 会话架构设计
+| 文件 | 职责 |
+|------|------|
+| `src/channels/wecom.ts` | 企业微信 WebSocket 连接和消息处理 |
+| `src/channels/registry.ts` | 渠道自注册机制 |
+| `src/index.ts` | 主消息循环和容器调度 |
+| `src/db.ts` | 消息存储和检索 |
+| `src/container-runner.ts` | 容器启动和 IPC |
+| `src/sender-allowlist.ts` | 发送者白名单 |
 
 ---
 
-## 更新记录
+## 架构设计说明
 
-| 日期 | 版本 | 说明 |
-|------|------|------|
-| 2026-04-04 | 1.0 | 初始版本，记录 SDK 集成踩坑经验 |
+### 异步轮询架构
+
+NanoClaw 采用 **异步轮询** 而非实时推送的架构：
+
+| 特性 | 说明 |
+|------|------|
+| **实时接收** | WebSocket 实时接收消息 |
+| **持久化存储** | 消息存入 SQLite |
+| **轮询处理** | 每 2 秒轮询检查新消息 |
+| **容器隔离** | 每个 Agent 在独立容器中执行 |
+| **流式回复** | Agent 输出实时流式发送回用户 |
+
+### 设计优点
+
+1. **消息不丢失** - 持久化存储确保消息安全
+2. **可控的并发** - 队列管理容器数量
+3. **安全隔离** - 容器执行保护宿主机
+4. **可扩展性** - 易于添加新的消息类型和处理逻辑
+
+---
+
+## 调试与排查
+
+### 日志查看
+
+```bash
+# 查看容器日志
+ls groups/wecom-{name}/logs/
+
+# 查看主进程日志
+# 日志输出到 stderr，可通过 systemd/launchd 查看journalctl --user -u nanoclaw -f
+
+# macOS
+log show --predicate 'process == "node"' --last 1h
+```
+
+### 常见问题
+
+| 问题 | 可能原因 | 解决方案 |
+|------|----------|----------|
+| 无法连接 | 凭证错误 | 检查 WECOM_BOT_ID 和 WECOM_SECRET |
+| 收不到消息 | WebSocket 断开 | 检查网络连接，重启服务 |
+| 回复失败 | pendingReplies 过期 | 检查 reply 时效性 (通常 5 秒) |
+
+---
+
+*文档生成时间: 2026-04-06*

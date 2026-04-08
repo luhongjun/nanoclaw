@@ -223,20 +223,6 @@ export function storeChatMetadata(
   }
 }
 
-/**
- * Update chat name without changing timestamp for existing chats.
- * New chats get the current time as their initial timestamp.
- * Used during group metadata sync.
- */
-export function updateChatName(chatJid: string, name: string): void {
-  db.prepare(
-    `
-    INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
-    ON CONFLICT(jid) DO UPDATE SET name = excluded.name
-  `,
-  ).run(chatJid, name, new Date().toISOString());
-}
-
 export interface ChatInfo {
   jid: string;
   name: string;
@@ -261,64 +247,10 @@ export function getAllChats(): ChatInfo[] {
 }
 
 /**
- * Get timestamp of last group metadata sync.
- */
-export function getLastGroupSync(): string | null {
-  // Store sync time in a special chat entry
-  const row = db
-    .prepare(`SELECT last_message_time FROM chats WHERE jid = '__group_sync__'`)
-    .get() as { last_message_time: string } | undefined;
-  return row?.last_message_time || null;
-}
-
-/**
- * Record that group metadata was synced.
- */
-export function setLastGroupSync(): void {
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO chats (jid, name, last_message_time) VALUES ('__group_sync__', '__group_sync__', ?)`,
-  ).run(now);
-}
-
-/**
  * Store a message with full content.
  * Only call this for registered groups where message history is needed.
  */
 export function storeMessage(msg: NewMessage): void {
-  db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, msgtype, metadata, raw_payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-    msg.is_bot_message ? 1 : 0,
-    msg.msgtype || null,
-    msg.metadata ? JSON.stringify(msg.metadata) : null,
-    msg.raw_payload ? JSON.stringify(msg.raw_payload) : null,
-  );
-}
-
-/**
- * Store a message directly.
- */
-export function storeMessageDirect(msg: {
-  id: string;
-  chat_jid: string;
-  sender: string;
-  sender_name: string;
-  content: string;
-  timestamp: string;
-  is_from_me: boolean;
-  is_bot_message?: boolean;
-  msgtype?: string;
-  metadata?: Record<string, any>;
-  raw_payload?: any;
-}): void {
   db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, msgtype, metadata, raw_payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -485,14 +417,6 @@ export function getTaskById(id: string): ScheduledTask | undefined {
     | undefined;
 }
 
-export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
-  return db
-    .prepare(
-      'SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC',
-    )
-    .all(groupFolder) as ScheduledTask[];
-}
-
 export function getAllTasks(): ScheduledTask[] {
   return db
     .prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC')
@@ -617,17 +541,6 @@ export function setRouterState(key: string, value: string): void {
 // --- Session accessors ---
 
 /**
- * Get session ID by chat_jid.
- * @param chatJid - The chat session identifier (e.g., 'wecom:luhj', 'wecom:group123')
- */
-export function getSession(chatJid: string): string | undefined {
-  const row = db
-    .prepare('SELECT session_id FROM sessions WHERE chat_jid = ?')
-    .get(chatJid) as { session_id: string } | undefined;
-  return row?.session_id;
-}
-
-/**
  * Set session ID for a chat_jid.
  * @param chatJid - The chat session identifier
  * @param sessionId - The Agent session ID
@@ -641,14 +554,6 @@ export function setSession(
   db.prepare(
     "INSERT OR REPLACE INTO sessions (chat_jid, session_id, group_folder, updated_at) VALUES (?, ?, ?, datetime('now'))",
   ).run(chatJid, sessionId, groupFolder || null);
-}
-
-/**
- * Delete session by chat_jid.
- * @param chatJid - The chat session identifier
- */
-export function deleteSession(chatJid: string): void {
-  db.prepare('DELETE FROM sessions WHERE chat_jid = ?').run(chatJid);
 }
 
 /**

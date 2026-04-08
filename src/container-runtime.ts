@@ -85,62 +85,21 @@ export function cleanupOrphans(): void {
     const orphans = output.trim().split('\n').filter(Boolean);
     for (const name of orphans) {
       try {
-        stopContainer(name);
+        execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${name}`, {
+          stdio: 'pipe',
+          timeout: 10000,
+        });
       } catch {
-        /* already stopped */
+        /* already removed */
       }
     }
     if (orphans.length > 0) {
       logger.info(
         { count: orphans.length, names: orphans },
-        'Stopped orphaned containers',
+        'Removed orphaned containers',
       );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
-  }
-}
-
-/** Check if a container exists and is running. */
-export function isContainerRunning(name: string): boolean {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
-    return false;
-  }
-  try {
-    const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} ps --filter name=^${name}$ --format '{{.Names}}'`,
-      { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 },
-    );
-    return output.trim() === name;
-  } catch {
-    return false;
-  }
-}
-
-/** Remove a container by name (force stop if running). */
-export function removeContainer(name: string): void {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
-    throw new Error(`Invalid container name: ${name}`);
-  }
-  try {
-    execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${name}`, {
-      stdio: 'pipe',
-      timeout: 10000,
-    });
-  } catch (err) {
-    logger.warn({ name, err }, 'Failed to remove container');
-  }
-}
-
-/** Get list of all NanoClaw container names. */
-export function listNanoclawContainers(): string[] {
-  try {
-    const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
-      { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 },
-    );
-    return output.trim().split('\n').filter(Boolean);
-  } catch {
-    return [];
   }
 }

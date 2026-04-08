@@ -32,8 +32,6 @@ import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 import { readEnvFile } from './env.js';
-import { containerPool, ContainerAcquireResult } from './container-pool.js';
-import { CONTAINER_POOL_ENABLED } from './config.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -234,13 +232,8 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
-  usePool: boolean = false,
 ): Promise<string[]> {
-  // When pool is enabled, don't use --rm so containers persist for reuse
-  const baseArgs = usePool
-    ? ['run', '-i', '--name', containerName]
-    : ['run', '-i', '--rm', '--name', containerName];
-  const args: string[] = baseArgs;
+  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Memory limit: 2GB (agent needs ~1.5GB for Node.js + Chromium + SDK)
   // Exit code 137 = SIGKILL from OOM killer - this was the root cause of container deaths
@@ -344,34 +337,25 @@ export async function runContainerAgent(
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
 
-  // Try to acquire existing container from pool (for tracking purposes)
-  const acquired = containerPool.acquire(group, input.chatJid, containerName);
+  // Use unique container name each time to avoid Docker name conflicts.
+  // --rm handles cleanup automatically; no pre-cleanup needed.
+  const uniqueContainerName = `${containerName}-${Date.now()}`;
 
-  // Note: Container reuse via IPC is not yet implemented.
-  // For now, the pool tracks containers and cleans up idle ones,
-  // but each message still spawns a fresh container.
-  // TODO: Implement true container reuse by keeping stdin open and
-  // appending messages via IPC.
-
-  // Create new container
-  const usePool = CONTAINER_POOL_ENABLED;
   const containerArgs = await buildContainerArgs(
     mounts,
-    containerName,
+    uniqueContainerName,
     agentIdentifier,
-    usePool,
   );
 
   logger.debug(
     {
       group: group.name,
-      containerName,
+      containerName: uniqueContainerName,
       mounts: mounts.map(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
       containerArgs: containerArgs.join(' '),
-      usePool,
     },
     'Container mount configuration',
   );
@@ -379,44 +363,12 @@ export async function runContainerAgent(
   logger.info(
     {
       group: group.name,
-      containerName,
+      containerName: uniqueContainerName,
       mountCount: mounts.length,
       isMain: input.isMain,
-      usePool,
     },
     'Spawning container agent',
   );
-
-  // Pre-cleanup only if not using pool (pool handles cleanup)
-  if (!usePool) {
-    try {
-      const { execSync } = require('child_process');
-      execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerName}`, {
-        stdio: 'pipe',
-        timeout: 5000,
-      });
-      // Wait for container to be fully removed (Docker --rm can have slight delay)
-      for (let i = 0; i < 10; i++) {
-        try {
-          const check = execSync(
-            `${CONTAINER_RUNTIME_BIN} ps -q --filter name=^${containerName}$`,
-            {
-              stdio: 'pipe',
-              timeout: 2000,
-            },
-          )
-            .toString()
-            .trim();
-          if (check === '') break;
-        } catch {
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-    } catch {
-      // Container doesn't exist or already removed - this is fine
-    }
-  }
 
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
@@ -426,14 +378,14 @@ export async function runContainerAgent(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    onProcess(container, containerName);
+    onProcess(container, uniqueContainerName);
 
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
+    container.stdin.write(JSON.stringify({ type: 'init', ...input }));
     container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
@@ -480,8 +432,6 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
-            // Update pool activity timestamp for idle tracking
-            containerPool.touch(input.chatJid);
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
@@ -527,14 +477,14 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
-        { group: group.name, containerName },
+        { group: group.name, containerName: uniqueContainerName },
         'Container timeout, stopping gracefully',
       );
       try {
-        stopContainer(containerName);
+        stopContainer(uniqueContainerName);
       } catch (err) {
         logger.warn(
-          { group: group.name, containerName, err },
+          { group: group.name, containerName: uniqueContainerName, err },
           'Graceful stop failed, force killing',
         );
         container.kill('SIGKILL');
@@ -562,7 +512,7 @@ export async function runContainerAgent(
             `=== Container Run Log (TIMEOUT) ===`,
             `Timestamp: ${new Date().toISOString()}`,
             `Group: ${group.name}`,
-            `Container: ${containerName}`,
+            `Container: ${uniqueContainerName}`,
             `Duration: ${duration}ms`,
             `Exit Code: ${code}`,
             `Had Streaming Output: ${hadStreamingOutput}`,
@@ -574,7 +524,7 @@ export async function runContainerAgent(
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName, duration, code },
+            { group: group.name, containerName: uniqueContainerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
@@ -588,7 +538,7 @@ export async function runContainerAgent(
         }
 
         logger.error(
-          { group: group.name, containerName, duration, code },
+          { group: group.name, containerName: uniqueContainerName, duration, code },
           'Container timed out with no output',
         );
 
@@ -692,19 +642,10 @@ export async function runContainerAgent(
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
         outputChain.then(() => {
-          // When using pool, mark container as idle instead of closing
-          if (usePool) {
-            containerPool.release(input.chatJid);
-            logger.info(
-              { group: group.name, duration, newSessionId, containerName },
-              'Container marked as idle (pool mode)',
-            );
-          } else {
-            logger.info(
-              { group: group.name, duration, newSessionId },
-              'Container completed (streaming mode)',
-            );
-          }
+          logger.info(
+            { group: group.name, duration, newSessionId },
+            'Container completed (streaming mode)',
+          );
           resolve({
             status: 'success',
             result: null,
@@ -766,7 +707,7 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       logger.error(
-        { group: group.name, containerName, error: err },
+        { group: group.name, containerName: uniqueContainerName, error: err },
         'Container spawn error',
       );
       resolve({
