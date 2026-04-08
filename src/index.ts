@@ -58,10 +58,19 @@ function cleanupPidFile(): void {
 }
 
 process.on('exit', cleanupPidFile);
-process.on('SIGINT', () => { cleanupPidFile(); process.exit(); });
-process.on('SIGTERM', () => { cleanupPidFile(); process.exit(); });
+process.on('SIGINT', () => {
+  cleanupPidFile();
+  process.exit();
+});
+process.on('SIGTERM', () => {
+  cleanupPidFile();
+  process.exit();
+});
 if (process.platform === 'win32') {
-  process.on('SIGBREAK', () => { cleanupPidFile(); process.exit(); });
+  process.on('SIGBREAK', () => {
+    cleanupPidFile();
+    process.exit();
+  });
 }
 
 process.on('uncaughtException', (err) => {
@@ -85,13 +94,19 @@ import {
   TIMEZONE,
 } from './config.js';
 import './channels/index.js';
-import { getChannelFactory, getRegisteredChannelNames } from './channels/registry.js';
+import {
+  getChannelFactory,
+  getRegisteredChannelNames,
+} from './channels/registry.js';
 import {
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
+import {
+  cleanupOrphans,
+  ensureContainerRuntimeRunning,
+} from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -111,7 +126,11 @@ import {
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
-import { restoreRemoteControl, startRemoteControl, stopRemoteControl } from './remote-control.js';
+import {
+  restoreRemoteControl,
+  startRemoteControl,
+  stopRemoteControl,
+} from './remote-control.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -141,8 +160,16 @@ function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
   const identifier = group.folder.toLowerCase().replace(/_/g, '-');
   onecli.ensureAgent({ name: group.name, identifier }).then(
-    (res) => logger.info({ jid, identifier, created: res.created }, 'OneCLI agent ensured'),
-    (err) => logger.debug({ jid, identifier, err: String(err) }, 'OneCLI agent ensure skipped'),
+    (res) =>
+      logger.info(
+        { jid, identifier, created: res.created },
+        'OneCLI agent ensured',
+      ),
+    (err) =>
+      logger.debug(
+        { jid, identifier, err: String(err) },
+        'OneCLI agent ensure skipped',
+      ),
   );
 }
 
@@ -157,7 +184,10 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
-  logger.info({ groupCount: Object.keys(registeredGroups).length }, 'State loaded');
+  logger.info(
+    { groupCount: Object.keys(registeredGroups).length },
+    'State loaded',
+  );
 }
 
 function getOrRecoverCursor(chatJid: string): string {
@@ -166,7 +196,10 @@ function getOrRecoverCursor(chatJid: string): string {
 
   const botTs = getLastBotMessageTimestamp(chatJid, ASSISTANT_NAME);
   if (botTs) {
-    logger.info({ chatJid, recoveredFrom: botTs }, 'Recovered message cursor from last bot reply');
+    logger.info(
+      { chatJid, recoveredFrom: botTs },
+      'Recovered message cursor from last bot reply',
+    );
     lastAgentTimestamp[chatJid] = botTs;
     saveState();
     return botTs;
@@ -184,7 +217,10 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   try {
     groupDir = resolveGroupFolderPath(group.folder);
   } catch (err) {
-    logger.warn({ jid, folder: group.folder, err }, 'Rejecting group registration with invalid folder');
+    logger.warn(
+      { jid, folder: group.folder, err },
+      'Rejecting group registration with invalid folder',
+    );
     return;
   }
 
@@ -195,7 +231,11 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   const groupMdFile = path.join(groupDir, 'CLAUDE.md');
   if (!fs.existsSync(groupMdFile)) {
-    const templateFile = path.join(GROUPS_DIR, group.isMain ? 'main' : 'global', 'CLAUDE.md');
+    const templateFile = path.join(
+      GROUPS_DIR,
+      group.isMain ? 'main' : 'global',
+      'CLAUDE.md',
+    );
     if (fs.existsSync(templateFile)) {
       let content = fs.readFileSync(templateFile, 'utf-8');
       if (ASSISTANT_NAME !== 'Andy') {
@@ -208,7 +248,10 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   }
 
   ensureOneCLIAgent(jid, group);
-  logger.info({ jid, name: group.name, folder: group.folder }, 'Group registered');
+  logger.info(
+    { jid, name: group.name, folder: group.folder },
+    'Group registered',
+  );
 }
 
 export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
@@ -225,7 +268,9 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
     }));
 }
 
-export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
+export function _setRegisteredGroups(
+  groups: Record<string, RegisteredGroup>,
+): void {
   registeredGroups = groups;
 }
 
@@ -258,10 +303,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor before processing
   const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+  lastAgentTimestamp[chatJid] =
+    missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
-  logger.info({ group: group.name, messageCount: missedMessages.length }, 'Processing messages');
+  logger.info(
+    { group: group.name, messageCount: missedMessages.length },
+    'Processing messages',
+  );
 
   // Show typing indicator
   await channel.setTyping?.(chatJid, true);
@@ -314,9 +363,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           setSession(chatJid, output.newSessionId, group.folder);
         }
         if (output.result) {
-          const raw = typeof output.result === 'string' ? output.result : JSON.stringify(output.result);
-          const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-          logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+          const raw =
+            typeof output.result === 'string'
+              ? output.result
+              : JSON.stringify(output.result);
+          const text = raw
+            .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+            .trim();
+          logger.info(
+            { group: group.name },
+            `Agent output: ${raw.length} chars`,
+          );
           if (text) {
             await channel.sendMessage(chatJid, text);
             outputSentToUser = true;
@@ -324,7 +381,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         }
         if (output.status === 'error') {
           hadError = true;
-          logger.error({ group: group.name, error: output.error }, 'Container error');
+          logger.error(
+            { group: group.name, error: output.error },
+            'Container error',
+          );
         }
       },
     );
@@ -333,7 +393,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!outputSentToUser) {
       if (result.status === 'error') {
         hadError = true;
-        logger.error({ group: group.name, error: result.error }, 'Container final error');
+        logger.error(
+          { group: group.name, error: result.error },
+          'Container final error',
+        );
       }
       // success with null result = no output produced, nothing to send
     }
@@ -370,7 +433,11 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
+      const { messages, newTimestamp } = getNewMessages(
+        jids,
+        lastTimestamp,
+        ASSISTANT_NAME,
+      );
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
@@ -405,17 +472,22 @@ async function startMessageLoop(): Promise<void> {
           // Check if already processing this chat
           const existingLock = processingLocks.get(chatJid);
           if (existingLock) {
-            logger.debug({ chatJid }, 'Already processing, will queue messages');
+            logger.debug(
+              { chatJid },
+              'Already processing, will queue messages',
+            );
             continue;
           }
 
           // Start processing (non-blocking)
-          const lockPromise = processGroupMessages(chatJid).then(() => {
-            processingLocks.delete(chatJid);
-          }).catch((err) => {
-            logger.error({ chatJid, err }, 'Processing error');
-            processingLocks.delete(chatJid);
-          });
+          const lockPromise = processGroupMessages(chatJid)
+            .then(() => {
+              processingLocks.delete(chatJid);
+            })
+            .catch((err) => {
+              logger.error({ chatJid, err }, 'Processing error');
+              processingLocks.delete(chatJid);
+            });
 
           processingLocks.set(chatJid, lockPromise);
         }
@@ -430,16 +502,26 @@ async function startMessageLoop(): Promise<void> {
 
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const pending = getMessagesSince(chatJid, getOrRecoverCursor(chatJid), ASSISTANT_NAME, MAX_MESSAGES_PER_PROMPT);
+    const pending = getMessagesSince(
+      chatJid,
+      getOrRecoverCursor(chatJid),
+      ASSISTANT_NAME,
+      MAX_MESSAGES_PER_PROMPT,
+    );
     if (pending.length > 0) {
-      logger.info({ group: group.name, pendingCount: pending.length }, 'Recovery: found unprocessed messages');
+      logger.info(
+        { group: group.name, pendingCount: pending.length },
+        'Recovery: found unprocessed messages',
+      );
       // Trigger processing for pending messages
-      const lockPromise = processGroupMessages(chatJid).then(() => {
-        processingLocks.delete(chatJid);
-      }).catch((err) => {
-        logger.error({ chatJid, err }, 'Recovery processing error');
-        processingLocks.delete(chatJid);
-      });
+      const lockPromise = processGroupMessages(chatJid)
+        .then(() => {
+          processingLocks.delete(chatJid);
+        })
+        .catch((err) => {
+          logger.error({ chatJid, err }, 'Recovery processing error');
+          processingLocks.delete(chatJid);
+        });
       processingLocks.set(chatJid, lockPromise);
     }
   }
@@ -475,10 +557,17 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
 
   // Remote control handler
-  async function handleRemoteControl(command: string, chatJid: string, msg: NewMessage): Promise<void> {
+  async function handleRemoteControl(
+    command: string,
+    chatJid: string,
+    msg: NewMessage,
+  ): Promise<void> {
     const group = registeredGroups[chatJid];
     if (!group?.isMain) {
-      logger.warn({ chatJid, sender: msg.sender }, 'Remote control rejected: not main group');
+      logger.warn(
+        { chatJid, sender: msg.sender },
+        'Remote control rejected: not main group',
+      );
       return;
     }
 
@@ -486,15 +575,25 @@ async function main(): Promise<void> {
     if (!channel) return;
 
     if (command === '/remote-control') {
-      const result = await startRemoteControl(msg.sender, chatJid, process.cwd());
+      const result = await startRemoteControl(
+        msg.sender,
+        chatJid,
+        process.cwd(),
+      );
       if (result.ok) {
         await channel.sendMessage(chatJid, result.url);
       } else {
-        await channel.sendMessage(chatJid, `Remote Control failed: ${result.error}`);
+        await channel.sendMessage(
+          chatJid,
+          `Remote Control failed: ${result.error}`,
+        );
       }
     } else {
       const result = stopRemoteControl();
-      await channel.sendMessage(chatJid, result.ok ? 'Remote Control session ended.' : result.error);
+      await channel.sendMessage(
+        chatJid,
+        result.ok ? 'Remote Control session ended.' : result.error,
+      );
     }
   }
 
@@ -512,9 +611,15 @@ async function main(): Promise<void> {
       // Sender allowlist
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
-        if (shouldDropMessage(chatJid, cfg) && !isSenderAllowed(chatJid, msg.sender, cfg)) {
+        if (
+          shouldDropMessage(chatJid, cfg) &&
+          !isSenderAllowed(chatJid, msg.sender, cfg)
+        ) {
           if (cfg.logDenied) {
-            logger.debug({ chatJid, sender: msg.sender }, 'Dropping message (drop mode)');
+            logger.debug(
+              { chatJid, sender: msg.sender },
+              'Dropping message (drop mode)',
+            );
           }
           return;
         }
@@ -522,8 +627,13 @@ async function main(): Promise<void> {
 
       storeMessage(msg);
     },
-    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
-      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onChatMetadata: (
+      chatJid: string,
+      timestamp: string,
+      name?: string,
+      channel?: string,
+      isGroup?: boolean,
+    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
 
@@ -532,7 +642,10 @@ async function main(): Promise<void> {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
     if (!channel) {
-      logger.warn({ channel: channelName }, 'Channel credentials missing, skipping');
+      logger.warn(
+        { channel: channelName },
+        'Channel credentials missing, skipping',
+      );
       continue;
     }
     channels.push(channel);
@@ -549,8 +662,14 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue: {
-      enqueueTask: (chatJid: string, _taskId: string, fn: () => Promise<void>) => {
-        fn().catch((err) => logger.error({ chatJid, err }, 'Scheduled task error'));
+      enqueueTask: (
+        chatJid: string,
+        _taskId: string,
+        fn: () => Promise<void>,
+      ) => {
+        fn().catch((err) =>
+          logger.error({ chatJid, err }, 'Scheduled task error'),
+        );
       },
     },
     onProcess: () => {},
@@ -572,10 +691,15 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {
-      await Promise.all(channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)));
+      await Promise.all(
+        channels
+          .filter((ch) => ch.syncGroups)
+          .map((ch) => ch.syncGroups!(force)),
+      );
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag, rj) =>
+      writeGroupsSnapshot(gf, im, ag, rj),
     onTasksChanged: () => {
       const tasks = getAllTasks();
       const taskRows = tasks.map((t) => ({
@@ -603,7 +727,8 @@ async function main(): Promise<void> {
 
 const isDirectRun =
   process.argv[1] &&
-  new URL(import.meta.url).pathname === new URL(`file://${process.argv[1]}`).pathname;
+  new URL(import.meta.url).pathname ===
+    new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {

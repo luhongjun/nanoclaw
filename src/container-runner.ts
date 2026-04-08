@@ -524,7 +524,12 @@ export async function runContainerAgent(
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName: uniqueContainerName, duration, code },
+            {
+              group: group.name,
+              containerName: uniqueContainerName,
+              duration,
+              code,
+            },
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
@@ -538,7 +543,12 @@ export async function runContainerAgent(
         }
 
         logger.error(
-          { group: group.name, containerName: uniqueContainerName, duration, code },
+          {
+            group: group.name,
+            containerName: uniqueContainerName,
+            duration,
+            code,
+          },
           'Container timed out with no output',
         );
 
