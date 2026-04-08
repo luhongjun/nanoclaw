@@ -132,7 +132,6 @@ claude
 - `src/channels/registry.ts` - 渠道注册表（启动时自注册）
 - `src/ipc.ts` - IPC 监听与任务处理
 - `src/router.ts` - 消息格式化与出站路由
-- `src/group-queue.ts` - 带全局并发限制的群组队列
 - `src/container-runner.ts` - 生成流式智能体容器
 - `src/task-scheduler.ts` - 运行计划任务
 - `src/db.ts` - SQLite 操作（消息、群组、会话、状态）

@@ -32,8 +32,6 @@ import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 import { readEnvFile } from './env.js';
-import { containerPool, ContainerAcquireResult } from './container-pool.js';
-import { CONTAINER_POOL_ENABLED } from './config.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -217,17 +215,6 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Image cache directory - mount downloaded images for agent access
-  // Images are downloaded from WeCom and saved here for vision capabilities
-  const imageCacheDir = path.join(DATA_DIR, 'images');
-  if (fs.existsSync(imageCacheDir)) {
-    mounts.push({
-      hostPath: imageCacheDir,
-      containerPath: '/workspace/images',
-      readonly: true, // Read-only to prevent agent from modifying cached images
-    });
-  }
-
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -245,13 +232,8 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
-  shouldPersist: boolean = false,
 ): Promise<string[]> {
-  // When pool is enabled, don't use --rm so containers persist for reuse
-  const baseArgs = shouldPersist
-    ? ['run', '-i', '--name', containerName]
-    : ['run', '-i', '--rm', '--name', containerName];
-  const args: string[] = baseArgs;
+  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Memory limit: 2GB (agent needs ~1.5GB for Node.js + Chromium + SDK)
   // Exit code 137 = SIGKILL from OOM killer - this was the root cause of container deaths
@@ -355,70 +337,25 @@ export async function runContainerAgent(
     ? undefined
     : group.folder.toLowerCase().replace(/_/g, '-');
 
-  // Try to acquire existing container from pool
-  const acquired = containerPool.acquire(group, input.chatJid, containerName);
+  // Use unique container name each time to avoid Docker name conflicts.
+  // --rm handles cleanup automatically; no pre-cleanup needed.
+  const uniqueContainerName = `${containerName}-${Date.now()}`;
 
-  // When pool is enabled and container is already running, send message via IPC instead of spawning new container
-  if (CONTAINER_POOL_ENABLED && !acquired.isNew) {
-    logger.info(
-      { group: group.name, containerName, chatJid: input.chatJid },
-      'Reusing running container, sending message via IPC',
-    );
-
-    // Send message to existing container via IPC
-    const ipcInputDir = resolveGroupIpcPath(group.folder);
-    const ipcInputFileDir = path.join(ipcInputDir, 'input');
-    fs.mkdirSync(ipcInputFileDir, { recursive: true });
-
-    // Check for pending IPC messages - if any exist, return error
-    const pendingFiles = fs.readdirSync(ipcInputFileDir).filter(f => f.endsWith('.json'));
-    if (pendingFiles.length > 0) {
-      logger.warn({ group: group.name, pendingCount: pendingFiles.length }, 'IPC messages pending');
-      return {
-        status: 'error',
-        result: null,
-        error: 'AI 正在分析中，请稍后再发送消息',
-      };
-    }
-
-    const ipcMessage = {
-      type: 'message',
-      text: input.prompt,
-    };
-    const timestamp = Date.now().toString(36).padStart(6, '0');
-    const random = Math.random().toString(36).substring(2, 8);
-    const ipcFileName = `msg-${timestamp}-${random}.json`;
-    const ipcFilePath = path.join(ipcInputFileDir, ipcFileName);
-    fs.writeFileSync(ipcFilePath, JSON.stringify(ipcMessage));
-
-    // Return immediately - container is still running and will process the IPC
-    return {
-      status: 'success',
-      result: null,
-      newSessionId: undefined,
-    };
-  }
-
-  // Need to spawn new container (either pool disabled, or no existing container)
-  // Create new container
-  const shouldPersist = CONTAINER_POOL_ENABLED;
   const containerArgs = await buildContainerArgs(
     mounts,
-    containerName,
+    uniqueContainerName,
     agentIdentifier,
-    shouldPersist,
   );
 
   logger.debug(
     {
       group: group.name,
-      containerName,
+      containerName: uniqueContainerName,
       mounts: mounts.map(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
       containerArgs: containerArgs.join(' '),
-      shouldPersist,
     },
     'Container mount configuration',
   );
@@ -426,44 +363,12 @@ export async function runContainerAgent(
   logger.info(
     {
       group: group.name,
-      containerName,
+      containerName: uniqueContainerName,
       mountCount: mounts.length,
       isMain: input.isMain,
-      shouldPersist,
     },
     'Spawning container agent',
   );
-
-  // Pre-cleanup only if not using pool (pool handles cleanup)
-  if (!shouldPersist) {
-    try {
-      const { execSync } = require('child_process');
-      execSync(`${CONTAINER_RUNTIME_BIN} rm -f ${containerName}`, {
-        stdio: 'pipe',
-        timeout: 5000,
-      });
-      // Wait for container to be fully removed (Docker --rm can have slight delay)
-      for (let i = 0; i < 10; i++) {
-        try {
-          const check = execSync(
-            `${CONTAINER_RUNTIME_BIN} ps -q --filter name=^${containerName}$`,
-            {
-              stdio: 'pipe',
-              timeout: 2000,
-            },
-          )
-            .toString()
-            .trim();
-          if (check === '') break;
-        } catch {
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-    } catch {
-      // Container doesn't exist or already removed - this is fine
-    }
-  }
 
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
@@ -473,14 +378,14 @@ export async function runContainerAgent(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    onProcess(container, containerName);
+    onProcess(container, uniqueContainerName);
 
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
+    container.stdin.write(JSON.stringify({ type: 'init', ...input }));
     container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
@@ -527,8 +432,6 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
-            // Update pool activity timestamp for idle tracking
-            containerPool.touch(input.chatJid);
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
@@ -574,14 +477,14 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error(
-        { group: group.name, containerName },
+        { group: group.name, containerName: uniqueContainerName },
         'Container timeout, stopping gracefully',
       );
       try {
-        stopContainer(containerName);
+        stopContainer(uniqueContainerName);
       } catch (err) {
         logger.warn(
-          { group: group.name, containerName, err },
+          { group: group.name, containerName: uniqueContainerName, err },
           'Graceful stop failed, force killing',
         );
         container.kill('SIGKILL');
@@ -609,7 +512,7 @@ export async function runContainerAgent(
             `=== Container Run Log (TIMEOUT) ===`,
             `Timestamp: ${new Date().toISOString()}`,
             `Group: ${group.name}`,
-            `Container: ${containerName}`,
+            `Container: ${uniqueContainerName}`,
             `Duration: ${duration}ms`,
             `Exit Code: ${code}`,
             `Had Streaming Output: ${hadStreamingOutput}`,
@@ -621,7 +524,12 @@ export async function runContainerAgent(
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName, duration, code },
+            {
+              group: group.name,
+              containerName: uniqueContainerName,
+              duration,
+              code,
+            },
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
@@ -635,7 +543,12 @@ export async function runContainerAgent(
         }
 
         logger.error(
-          { group: group.name, containerName, duration, code },
+          {
+            group: group.name,
+            containerName: uniqueContainerName,
+            duration,
+            code,
+          },
           'Container timed out with no output',
         );
 
@@ -739,19 +652,10 @@ export async function runContainerAgent(
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
         outputChain.then(() => {
-          // When using pool, mark container as idle instead of closing
-          if (shouldPersist) {
-            containerPool.release(input.chatJid);
-            logger.info(
-              { group: group.name, duration, newSessionId, containerName },
-              'Container marked as idle (pool mode)',
-            );
-          } else {
-            logger.info(
-              { group: group.name, duration, newSessionId },
-              'Container completed (streaming mode)',
-            );
-          }
+          logger.info(
+            { group: group.name, duration, newSessionId },
+            'Container completed (streaming mode)',
+          );
           resolve({
             status: 'success',
             result: null,
@@ -813,7 +717,7 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       logger.error(
-        { group: group.name, containerName, error: err },
+        { group: group.name, containerName: uniqueContainerName, error: err },
         'Container spawn error',
       );
       resolve({

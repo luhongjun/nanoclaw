@@ -163,7 +163,6 @@ Telegram対応を追加したい場合、コアコードベースにTelegramを�
 - `src/channels/registry.ts` - チャネルレジストリ（起動時の自己登録）
 - `src/ipc.ts` - IPCウォッチャーとタスク処理
 - `src/router.ts` - メッセージフォーマットとアウトバウンドルーティング
-- `src/group-queue.ts` - グローバル同時実行制限付きのグループごとのキュー
 - `src/container-runner.ts` - ストリーミングエージェントコンテナの起動
 - `src/task-scheduler.ts` - スケジュールタスクの実行
 - `src/db.ts` - SQLite操作（メッセージ、グループ、セッション、状態）
